@@ -1,3 +1,4 @@
+import dataclasses
 import logging
 import os
 import typing
@@ -11,9 +12,6 @@ import rich.status
 import rich.text
 
 from switchbox.repository import Config, Repository
-
-pass_config = click.make_pass_decorator(Config)
-dry_run_option = click.option("-n", "--dry-run", is_flag=True, help="Dry run.")
 
 
 class Status:
@@ -33,10 +31,76 @@ class Status:
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         self.status.__exit__(exc_type, exc_val, exc_tb)
-        self.complete("{} {}".format(self.past, self.text))
+        self.complete("{} {}.".format(self.past, self.text))
 
-    def complete(self, task: str) -> None:
+    @staticmethod
+    def complete(task: str) -> None:
         rich.print("[green]✓[/]", task)
+
+
+@dataclasses.dataclass()
+class Context:
+    repository: Repository
+
+    @property
+    def path(self) -> str:
+        return f"[magenta]{self.repository.pretty_path}[/]"
+
+    @property
+    def mainline(self) -> str:
+        return f"[cyan]{self.repository.mainline}[/]"
+
+    @property
+    def upstream(self) -> str:
+        return f"[blue]{self.repository.upstream}[/]"
+
+    @property
+    def upstream_mainline(self) -> str:
+        return f"{self.upstream}/{self.mainline}"
+
+    def setup(self) -> None:
+        self.set_mainline(self.repository.detect_mainline())
+        self.set_upstream(self.repository.detect_upstream())
+
+    def set_mainline(self, mainline: str) -> None:
+        result = self.repository.set("mainline", mainline)
+        Status.complete(
+            f"Set [bold]{result.section}.{result.option}[/] = [cyan]{result.value}[/]."
+        )
+
+    def set_upstream(self, upstream: str) -> None:
+        result = self.repository.set("upstream", upstream)
+        Status.complete(
+            f"Set [bold]{result.section}.{result.option}[/] = [blue]{result.value}[/]."
+        )
+
+    def update_remotes(self) -> None:
+        with Status("Updating", "Updated", "all remotes"):
+            self.repository.update_remotes()
+
+    def update_mainline_branch(self) -> None:
+        with Status(
+            "Updating",
+            "Updated",
+            f"branch {self.mainline} to match {self.upstream_mainline}",
+        ):
+            self.repository.update_branch_from_remote(
+                remote=self.repository.upstream,
+                branch=self.repository.mainline,
+            )
+
+    def mainline_is_active_branch(self) -> bool:
+        return self.repository.active_branch == self.mainline
+
+    def switch_to_mainline_branch(self) -> None:
+        with Status("Switching", "Switched", f"to the {self.mainline} branch"):
+            self.repository.switch(self.repository.mainline)
+
+    def remove_merged_branches(self) -> None:
+        merged = self.repository.discover_merged_branches(self.repository.mainline)
+        for branch in merged:
+            with Status("Removing", "Removed", f"merged branch [cyan]{branch}[/]"):
+                self.repository.remove_branch(branch)
 
 
 @click.group(name="switchbox")
@@ -67,78 +131,62 @@ def main(ctx: click.Context, path: typing.Optional[os.PathLike], verbose: int) -
     }
     logging.basicConfig(level=verbosity[verbose])
 
-    ctx.obj = Repository(
-        config=Config(),
-        repo=git.Repo(path),
-        click=ctx,
-    )
+    ctx.obj = Context(Repository(config=Config(), repo=git.Repo(path)))
 
 
 @main.command()
 @click.pass_obj
-def setup(repository: Repository):
-    repository.update_remotes()
-    repository.detect_mainline()
+def setup(ctx: Context):
+    """Detect and set 'switchbox.mainline' and 'switchbox.upstream'."""
+    ctx.setup()
+
+
+@main.command(name="update")
+@click.pass_obj
+def update_remotes(ctx: Context) -> None:
+    """Run 'git remote update'."""
+    ctx.update_remotes()
 
 
 @main.command()
 @click.pass_obj
-def update(repository: Repository) -> None:
-    repository.update_remotes()
-    rich.print(f"Updated remotes for [blue]{repository}[/].")
+def config(ctx: Context) -> None:
+    """
+    Display the git config options used by switchbox.
 
-
-@main.command()
-@click.pass_obj
-def status(repository: Repository) -> None:
-    rich.print(
-        rich.panel.Panel(
-            renderable=rich.console.Group(
-                f"Mainline branch is [cyan]{repository.mainline}[/].",
-                f"Upstream remote is [cyan]{repository.upstream}[/].",
-            ),
-            title=f"[blue]{repository}[/]",
-            width=80,
-        )
-    )
+    You could also run 'git config --local --list | grep switchbox'.
+    """
+    for option in ctx.repository.options():
+        print(option)
 
 
 @main.command(name="set-mainline")
 @click.argument("mainline", type=click.STRING)
 @click.pass_obj
-def set_mainline(repository: Repository, mainline: str) -> None:
-    repository.set("mainline", mainline)
-    repository.click.invoke(status)
+def set_mainline(ctx: Context, mainline: str) -> None:
+    """Set 'switchbox.mainline' for this repository."""
+    ctx.set_mainline(mainline)
 
 
 @main.command(name="set-upstream")
 @click.argument("upstream", type=click.STRING)
 @click.pass_obj
-def set_upstream(repository: Repository, upstream: str) -> None:
-    repository.set("upstream", upstream)
-    repository.click.invoke(status)
+def set_upstream(ctx: Context, upstream: str) -> None:
+    """Set 'switchbox.upstream' for this repository."""
+    ctx.set_upstream(upstream)
 
 
 @main.command(name="end")
 @click.pass_obj
-def end(repository: Repository) -> None:
-    mainline = f"[cyan]{repository.mainline}[/]"
-    upstream = f"[blue]{repository.upstream}[/]"
+def end(ctx: Context) -> None:
+    """
+    Finish working on a branch.
 
-    with Status("Updating", "Updated", "all remotes"):
-        repository.update_remotes()
-
-    if repository.mainline_is_active_branch():
+    Updates the mainline branch, switches to it, and deletes any merged branches.
+    """
+    ctx.update_remotes()
+    if ctx.mainline_is_active_branch():
         raise click.ClickException("Already on the mainline branch")
-
-    with Status(
-        "Updating", "Updated", f"branch {mainline} to match {upstream}/{mainline}"
-    ):
-        repository.update_branch_from_remote(repository.upstream, repository.mainline)
-
-    with Status("Switching", "Switched", f"to the {mainline} branch"):
-        repository.switch(repository.mainline)
-
-    for branch in repository.discover_merged_branches(target=repository.mainline):
-        with Status("Removing", "Removed", f"merged branch [cyan]{branch}[/]"):
-            repository.remove_branch(branch)
+    ctx.update_mainline_branch()
+    ctx.switch_to_mainline_branch()
+    ctx.remove_merged_branches()

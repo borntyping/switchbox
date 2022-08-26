@@ -11,6 +11,18 @@ logger = logging.getLogger(__name__)
 F = typing.TypeVar("F", bound=typing.Callable)
 Named = typing.TypeVar("Named", git.Head, git.Remote)
 
+SECTION = "switchbox"
+
+
+@dataclasses.dataclass(frozen=True)
+class GitOption:
+    section: str
+    option: str
+    value: str
+
+    def __str__(self) -> str:
+        return f"{self.section}.{self.option}={self.value}"
+
 
 @dataclasses.dataclass(frozen=True)
 class Config:
@@ -28,40 +40,49 @@ class RepositoryException(click.ClickException):
 class Repository:
     repo: git.Repo
     config: Config
-    click: click.Context
 
-    def __str__(self) -> str:
+    @property
+    def path(self) -> pathlib.Path:
         if working_tree_dir := self.repo.working_tree_dir:
-            path = pathlib.Path(working_tree_dir)
-        else:
-            path = pathlib.Path(self.repo.git_dir)
+            return pathlib.Path(working_tree_dir)
 
+        return pathlib.Path(self.repo.git_dir)
+
+    @property
+    def name(self) -> str:
+        return self.path.name
+
+    @property
+    def pretty_path(self) -> str:
         home = pathlib.Path.home()
         try:
-            return f"~/{path.relative_to(home)}"
+            return f"~/{self.path.relative_to(home)}"
         except ValueError:
-            return f"{path}"
+            return f"{self.path}"
+
+    @property
+    def active_branch(self) -> str:
+        return self.repo.active_branch.name
 
     @property
     def mainline(self) -> str:
-        return self.detect_mainline()
-
-    @mainline.setter
-    def mainline(self, value: str) -> None:
-        self.set("mainline", value)
-
-    @property
-    def upstream(self) -> str:
-        return self.detect_upstream()
-
-    @upstream.setter
-    def upstream(self, value: str) -> None:
-        self.set("upstream", value)
-
-    def detect_mainline(self) -> str:
         if mainline := self.get("mainline"):
             return mainline
 
+        return self.detect_mainline()
+
+    @property
+    def upstream(self) -> str:
+        if upstream := self.get("upstream"):
+            return upstream
+
+        return self.detect_upstream()
+
+    @property
+    def section(self) -> str:
+        return self.config.application
+
+    def detect_mainline(self) -> str:
         if not self.repo.heads:
             raise RepositoryException(
                 "Repository has no branches. Is this a new repository?"
@@ -74,9 +95,6 @@ class Repository:
         raise RepositoryException(f"Could not find a mainline branch for {self}.")
 
     def detect_upstream(self) -> str:
-        if upstream := self.get("upstream"):
-            return upstream
-
         if not self.repo.heads:
             raise RepositoryException(
                 "Repository has no remotes. Is this a new repository?"
@@ -90,14 +108,14 @@ class Repository:
 
     def get(self, option: str) -> typing.Optional[str]:
         with self.repo.config_reader() as reader:
-            if reader.has_section(self.config.application):
-                if reader.has_option(self.config.application, option):
-                    value = reader.get_value(self.config.application, option)
+            if reader.has_section(SECTION):
+                if reader.has_option(SECTION, option):
+                    value = reader.get_value(SECTION, option)
 
                     if isinstance(value, float):
                         raise RepositoryException(
                             "Unexpected value for {}.{}: {!r}".format(
-                                self.config.application,
+                                SECTION,
                                 option,
                                 value,
                             )
@@ -106,12 +124,22 @@ class Repository:
                     return value
         return None
 
-    def set(self, option: str, value: str) -> None:
+    def set(self, option: str, value: str) -> GitOption:
         with self.repo.config_writer("repository") as writer:
-            if not writer.has_section(self.config.application):
-                writer.add_section(self.config.application)
+            if not writer.has_section(SECTION):
+                writer.add_section(SECTION)
+            writer.set(SECTION, option, value)
 
-            writer.set(self.config.application, option, value)
+        return GitOption(SECTION, option, value)
+
+    def options(self) -> typing.Sequence[GitOption]:
+        with self.repo.config_reader() as reader:
+            if not reader.has_section(SECTION):
+                return []
+            return [
+                GitOption(SECTION, option, value)
+                for option, value in reader.items(SECTION)
+            ]
 
     @staticmethod
     def _first_match(
@@ -137,9 +165,6 @@ class Repository:
 
     def switch(self, mainline: str) -> None:
         self.repo.git.switch(mainline)
-
-    def mainline_is_active_branch(self) -> bool:
-        return self.repo.active_branch.name == self.mainline
 
     def discover_merged_branches(self, target: str) -> typing.Set[str]:
         """Find branches merged into a target branch."""
