@@ -130,3 +130,33 @@ class Repository:
             insert_kwargs_after="update",
             prune=True,
         )
+
+    def update_branch_from_remote(self, remote: str, branch: str) -> None:
+        self.repo.git.branch(branch, f"{remote}/{branch}", force=True)
+        # self.repo.git.fetch(remote, f"{branch}:{branch}", "--update-head-ok")
+
+    def switch(self, mainline: str) -> None:
+        self.repo.git.switch(mainline)
+
+    def mainline_is_active_branch(self) -> bool:
+        return self.repo.active_branch.name == self.mainline
+
+    def discover_merged_branches(self, target: str) -> typing.Set[str]:
+        """Find branches merged into a target branch."""
+        rc, stdout, stderr = self.repo.git.branch(
+            "--list",
+            "--format=%(refname:short)",
+            "--merged",
+            target,
+            with_extended_output=True,
+        )
+        return {line.lstrip() for line in stdout.splitlines()} - {target}
+
+    def remove_branch(self, branch: str, *, dry_run: bool = False) -> None:
+        if self.repo.active_branch.name == branch:
+            logger.debug("Skipping active branch %s", branch)
+        elif dry_run:
+            logger.info("Would delete branch %s", branch)
+        else:
+            logger.info("Deleting branch %s", branch)
+            self.repo.delete_head(branch)

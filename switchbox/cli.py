@@ -7,11 +7,36 @@ import git
 import rich
 import rich.console
 import rich.panel
+import rich.status
+import rich.text
 
 from switchbox.repository import Config, Repository
 
 pass_config = click.make_pass_decorator(Config)
 dry_run_option = click.option("-n", "--dry-run", is_flag=True, help="Dry run.")
+
+
+class Status:
+    def __init__(self, present: str, past: str, text: str) -> None:
+        self.text = text
+        self.present = present
+        self.past = past
+        self.status = rich.status.Status(
+            status="{} {}".format(self.present, self.text),
+            speed=2.0,
+            spinner_style="arrow3",
+        )
+
+    def __enter__(self) -> "Status":
+        self.status.__enter__()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        self.status.__exit__(exc_type, exc_val, exc_tb)
+        self.complete("{} {}".format(self.past, self.text))
+
+    def complete(self, task: str) -> None:
+        rich.print("[green]✓[/]", task)
 
 
 @click.group(name="switchbox")
@@ -97,13 +122,23 @@ def set_upstream(repository: Repository, upstream: str) -> None:
 @main.command(name="end")
 @click.pass_obj
 def end(repository: Repository) -> None:
-    repository.update_remotes()
-    repository.click.invoke(status)
+    mainline = f"[cyan]{repository.mainline}[/]"
+    upstream = f"[blue]{repository.upstream}[/]"
 
-    assert repository.repo.head.name != repository.mainline
-    repository.repo.git.fetch(
-        repository.upstream,
-        f"{repository.mainline}:{repository.mainline}",
-        "--update-head-ok",
-    )
-    repository.repo.git.switch(repository.mainline)
+    with Status("Updating", "Updated", "all remotes"):
+        repository.update_remotes()
+
+    if repository.mainline_is_active_branch():
+        raise click.ClickException("Already on the mainline branch")
+
+    with Status(
+        "Updating", "Updated", f"branch {mainline} to match {upstream}/{mainline}"
+    ):
+        repository.update_branch_from_remote(repository.upstream, repository.mainline)
+
+    with Status("Switching", "Switched", f"to the {mainline} branch"):
+        repository.switch(repository.mainline)
+
+    for branch in repository.discover_merged_branches(target=repository.mainline):
+        with Status("Removing", "Removed", f"merged branch [cyan]{branch}[/]"):
+            repository.remove_branch(branch)
