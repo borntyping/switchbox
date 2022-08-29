@@ -10,32 +10,17 @@ import rich.console
 import rich.panel
 import rich.status
 import rich.text
+import inflect
 
-from switchbox.repository import Config, Repository
+from switchbox.repository import Config, GitOption, Repository
 
+p = inflect.engine()
 
-class Status:
-    def __init__(self, present: str, past: str, text: str) -> None:
-        self.text = text
-        self.present = present
-        self.past = past
-        self.status = rich.status.Status(
-            status="{} {}".format(self.present, self.text),
-            speed=2.0,
-            spinner_style="arrow3",
-        )
-
-    def __enter__(self) -> "Status":
-        self.status.__enter__()
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
-        self.status.__exit__(exc_type, exc_val, exc_tb)
-        self.complete("{} {}.".format(self.past, self.text))
-
-    @staticmethod
-    def complete(task: str) -> None:
-        rich.print("[green]✓[/]", task)
+remote_update_option = click.option(
+    "--update/--no-update",
+    default=True,
+    help="Run 'git remote update --prune' before anything else.",
+)
 
 
 @dataclasses.dataclass()
@@ -63,44 +48,56 @@ class Context:
         self.set_upstream(self.repository.detect_upstream())
 
     def set_mainline(self, mainline: str) -> None:
-        result = self.repository.set("mainline", mainline)
-        Status.complete(
-            f"Set [bold]{result.section}.{result.option}[/] = [cyan]{result.value}[/]."
-        )
+        self._set(self.repository.set("mainline", mainline))
 
     def set_upstream(self, upstream: str) -> None:
-        result = self.repository.set("upstream", upstream)
-        Status.complete(
-            f"Set [bold]{result.section}.{result.option}[/] = [blue]{result.value}[/]."
-        )
+        self._set(self.repository.set("upstream", upstream))
+
+    def _set(self, result: GitOption) -> None:
+        option = f"[bold]{result.section}.{result.option}[/]"
+        value = f"[blue]{result.value}[/]"
+        self.done(f"Set {option} = {value}.")
 
     def update_remotes(self) -> None:
-        with Status("Updating", "Updated", "all remotes"):
+        with rich.status.Status("Updating all remotes..."):
             self.repository.update_remotes()
+        self.done("Updated all remotes.")
 
     def update_mainline_branch(self) -> None:
-        with Status(
-            "Updating",
-            "Updated",
-            f"branch {self.mainline} to match {self.upstream_mainline}",
+        with rich.status.Status(
+            f"Updating branch {self.mainline} to match {self.upstream_mainline}."
         ):
             self.repository.update_branch_from_remote(
                 remote=self.repository.upstream,
                 branch=self.repository.mainline,
             )
+        self.done(f"Updated branch {self.mainline} to match {self.upstream_mainline}.")
 
     def mainline_is_active_branch(self) -> bool:
         return self.repository.active_branch == self.mainline
 
     def switch_to_mainline_branch(self) -> None:
-        with Status("Switching", "Switched", f"to the {self.mainline} branch"):
+        with rich.status.Status(f"Switching to the {self.mainline} branch..."):
             self.repository.switch(self.repository.mainline)
+        self.done(f"Switched to the {self.mainline} branch.")
 
     def remove_merged_branches(self) -> None:
-        merged = self.repository.discover_merged_branches(self.repository.mainline)
+        with rich.status.Status("Finding merged branches..."):
+            merged = self.repository.discover_merged_branches(self.repository.mainline)
+
+        if not merged:
+            self.done(f"No merged branches to cleanup.")
+            return
+
+        self.done(f"Found {len(merged)} {p.plural('branch', len(merged))}.")
         for branch in merged:
-            with Status("Removing", "Removed", f"merged branch [cyan]{branch}[/]"):
+            with rich.status.Status("Removing merged branch [cyan]{branch}[/]..."):
                 self.repository.remove_branch(branch)
+            self.done("Removed merged branch [cyan]{branch}[/].")
+
+    @staticmethod
+    def done(task: str) -> None:
+        rich.print("[green]✓[/]", task)
 
 
 @click.group(name="switchbox")
@@ -176,15 +173,32 @@ def set_upstream(ctx: Context, upstream: str) -> None:
     ctx.set_upstream(upstream)
 
 
-@main.command(name="end")
+@main.command(name="tidy")
+@remote_update_option
 @click.pass_obj
-def end(ctx: Context) -> None:
+def tidy(ctx: Context, update: bool) -> None:
+    """
+    Cleans up branches.
+
+    Removes upstream branches that no longer exist and local branches that have been
+    merged into the mainline branch.
+    """
+    if update:
+        ctx.update_remotes()
+    ctx.remove_merged_branches()
+
+
+@main.command(name="end")
+@remote_update_option
+@click.pass_obj
+def end(ctx: Context, update: bool) -> None:
     """
     Finish working on a branch.
 
     Updates the mainline branch, switches to it, and deletes any merged branches.
     """
-    ctx.update_remotes()
+    if update:
+        ctx.update_remotes()
     if ctx.mainline_is_active_branch():
         raise click.ClickException("Already on the mainline branch")
     ctx.update_mainline_branch()
