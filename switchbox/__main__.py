@@ -1,3 +1,4 @@
 import switchbox.cli
 
-switchbox.cli.main()
+if __name__ == "__main__":
+    switchbox.cli.main()
