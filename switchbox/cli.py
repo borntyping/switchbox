@@ -27,6 +27,7 @@ console = rich.console.Console(
 
 remote_update_option = click.option(
     "--update/--no-update",
+    "update_remotes",
     default=True,
     is_flag=True,
     help="Run 'git remote update --prune' before anything else.",
@@ -57,7 +58,7 @@ class Output:
         return text.format_map(self.context)
 
     def status(self, text: str) -> rich.status.Status:
-        return rich.status.Status(self.format(text), speed=2.0, spinner_style="arrow3")
+        return rich.status.Status(self.format(text), speed=2.0, spinner="arrow3")
 
     def done(self, task: str) -> None:
         console.print("[green]✓[/]", self.format(task), highlight=False)
@@ -194,13 +195,13 @@ class Application:
         file_okay=False,
         exists=True,
     ),
-    help="Will use GIT_DIR or the current working directory if not set.",
+    help="Will use GIT_DIR or the current directory if not set.",
 )
 @click.option(
     "-v",
     "--verbose",
     count=True,
-    help="Show WARNING (-v), INFO (-vv), and DEBUG (-vvv) logging messages.",
+    help="Show WARNING (-v), INFO (-vv), and DEBUG (-vvv) logs.",
 )
 @click.pass_context
 def main(ctx: click.Context, path: typing.Optional[os.PathLike], verbose: int) -> None:
@@ -215,78 +216,97 @@ def main(ctx: click.Context, path: typing.Optional[os.PathLike], verbose: int) -
     ctx.obj = Application(repo=Repo(config=Config(), gitpython=git.Repo(path)))
 
 
-@main.command()
+@main.group(invoke_without_command=True)
 @click.pass_obj
-def setup(app: Application):
-    """Detect and set 'switchbox.mainline' and 'switchbox.upstream'."""
+@click.pass_context
+def config(ctx: click.Context, app: Application) -> None:
+    """
+    Manage config options.
+
+    Will display the git config options used by switchbox if no subcommand is given.
+    """
+    if ctx.invoked_subcommand is None:
+        for option in app.repo.options():
+            print(option)
+
+
+@config.command()
+@click.pass_obj
+def config_init(app: Application):
+    """
+    Find and remember a mainline branch and upstream remote.
+
+    This will be done automatically when you first use a command that works on a
+    mainline branch or upstream remote.
+    """
     app.setup()
 
 
-@main.command(name="update")
-@click.pass_obj
-def update_remotes(app: Application) -> None:
-    """Run 'git remote update'."""
-    app.update_remotes()
-
-
-@main.command()
-@click.pass_obj
-def config(app: Application) -> None:
-    """
-    Display the git config options used by switchbox.
-
-    You could also run 'git config --local --list | grep switchbox'.
-    """
-    for option in app.repo.options():
-        print(option)
-
-
-@main.command(name="set-mainline")
+@config.command(name="mainline")
 @click.argument("mainline", type=click.STRING)
 @click.pass_obj
-def set_mainline(app: Application, mainline: str) -> None:
-    """Set 'switchbox.mainline' for this repository."""
+def config_mainline(app: Application, mainline: str) -> None:
+    """
+    Set the mainline branch.
+
+    Sets 'switchbox.mainline' in the repository's '.git/config' file.
+    """
     app.set_mainline(mainline)
 
 
-@main.command(name="set-upstream")
+@config.command(name="upstream")
 @click.argument("upstream", type=click.STRING)
 @click.pass_obj
-def set_upstream(app: Application, upstream: str) -> None:
-    """Set 'switchbox.upstream' for this repository."""
+def config_upstream(app: Application, upstream: str) -> None:
+    """
+    Set the upstream remote.
+
+    Sets 'switchbox.upstream' in the repository's '.git/config' file.
+    """
     app.set_upstream(upstream)
 
 
-@main.command(name="tidy")
+@main.command()
 @dry_run_option
 @remote_update_option
 @click.pass_obj
-def tidy(app: Application, dry_run: bool, update: bool) -> None:
+def finish(app: Application, dry_run: bool, update_remotes: bool) -> None:
+    """
+    Finish working on a branch.
+
+    Updates the mainline branch, switches to it, and deletes any merged branches.
+    """
+    if update_remotes:
+        app.update_remotes()
+    app.update_mainline_branch()
+    app.switch_to_mainline_branch()
+    app.remove_merged_branches(dry_run=dry_run)
+    app.remove_squashed_branches(dry_run=dry_run)
+
+
+@main.command()
+@dry_run_option
+@remote_update_option
+@click.pass_obj
+def tidy(app: Application, dry_run: bool, update_remotes: bool) -> None:
     """
     Cleans up branches.
 
     Removes upstream branches that no longer exist and local branches that have been
     merged into the mainline branch.
     """
-    if update:
+    if update_remotes:
         app.update_remotes()
     app.remove_merged_branches(dry_run=dry_run)
     app.remove_squashed_branches(dry_run=dry_run)
 
 
-@main.command(name="end")
-@dry_run_option
-@remote_update_option
+@main.command()
 @click.pass_obj
-def end(app: Application, dry_run: bool, update: bool) -> None:
+def update(app: Application) -> None:
     """
-    Finish working on a branch.
+    Update all git remotes.
 
-    Updates the mainline branch, switches to it, and deletes any merged branches.
+    Just runs 'git remote update --prune'.
     """
-    if update:
-        app.update_remotes()
-    app.update_mainline_branch()
-    app.switch_to_mainline_branch()
-    app.remove_merged_branches(dry_run=dry_run)
-    app.remove_squashed_branches(dry_run=dry_run)
+    app.update_remotes()
