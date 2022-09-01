@@ -291,6 +291,35 @@ def finish(app: Application, dry_run: bool, update_remotes: bool) -> None:
 
 
 @main.command()
+@click.pass_obj
+def sparse(app: Application) -> None:
+    """
+    Configure sparse checkout for a repository.
+
+    Excludes /.idea/ from being checked out.
+    """
+    output = Output()
+    with output.status("Configuring sparse-checkout..."):
+        app.repo.gitpython.git._call_process(
+            "sparse-checkout",
+            "set",
+            "/*",
+            "!/.idea/",
+            insert_kwargs_after="set",
+        )
+    output.done("Configured sparse-checkout")
+    with output.status("Reapplying sparse-checkout..."):
+        app.repo.gitpython.git._call_process(
+            "sparse-checkout",
+            "set",
+            "/*",
+            "!/.idea/",
+            insert_kwargs_after="set",
+        )
+    output.done("Reapplied sparse-checkout.")
+
+
+@main.command()
 @dry_run_option
 @remote_update_option
 @click.pass_obj
