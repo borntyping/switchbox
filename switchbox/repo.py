@@ -6,7 +6,7 @@ import typing
 import click
 import git
 
-from switchbox.ext.git import contains_squash_commit
+from switchbox.ext.git import contains_equivalent, contains_squash_commit
 
 logger = logging.getLogger(__name__)
 
@@ -171,7 +171,11 @@ class Repo:
         self.gitpython.git.switch(mainline)
 
     def discover_merged_branches(self, target: str) -> typing.Set[str]:
-        """Find branches merged into a target branch."""
+        """
+        Find branches merged into a target branch.
+
+        This uses 'git branch --merged' to find merged branches.
+        """
 
         rc, stdout, stderr = self.gitpython.git.branch(
             "--list",
@@ -182,16 +186,41 @@ class Repo:
         )
         return {line.lstrip() for line in stdout.splitlines()} - {target}
 
-    def discover_squashed_branches(self, branch: str) -> typing.Set[str]:
-        return {
-            b.name
-            for b in self.gitpython.heads
-            if contains_squash_commit(
-                self.gitpython,
-                a=self.gitpython.heads[branch],
-                b=b,
-            )
-        }
+    def discover_rebased_branches(self, target: str) -> typing.Iterable[str]:
+        """
+        Find branches rebased into a target branch.
+
+        This uses 'git cherry <mainline> <branch>' to find branches where all commits
+        from <branch> have an equivalent in the <mainline> branch.
+
+        https://git-scm.com/docs/git-cherry
+        """
+        upstream = self.gitpython.heads[target]
+        for branch in self.gitpython.heads:
+            if branch.name == target:
+                continue
+
+            if contains_equivalent(self.gitpython, upstream=upstream, head=branch):
+                logger.debug(
+                    "All commits in %(branch)s have an equivalent in %(target)s",
+                    {"branch": branch, "target": target},
+                )
+                yield branch.name
+
+    def discover_squashed_branches(self, target: str) -> typing.Iterable[str]:
+        a = self.gitpython.heads[target]
+
+        for branch in self.gitpython.heads:
+            if branch.name == target:
+                continue
+
+            if contains_squash_commit(self.gitpython, a=a, b=branch):
+                logger.debug(
+                    "Branch %(target)s contains a commit "
+                    "squashing all changes from %(branch)s",
+                    {"branch": branch, "target": target},
+                )
+                yield branch.name
 
     def remove_branch(self, branch: str, *, force: bool = False) -> None:
         if self.gitpython.active_branch.name == branch:

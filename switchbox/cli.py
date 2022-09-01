@@ -129,16 +129,22 @@ class Application:
         self._remove_branches(
             merged="[green]merged[/]",
             method=self.repo.discover_merged_branches,
-            target=self.repo.mainline,
             dry_run=dry_run,
             force=False,
+        )
+
+    def remove_rebased_branches(self, dry_run: bool = True) -> None:
+        self._remove_branches(
+            merged="[yellow]rebased[/]",
+            method=self.repo.discover_rebased_branches,
+            dry_run=dry_run,
+            force=True,
         )
 
     def remove_squashed_branches(self, dry_run: bool = True) -> None:
         self._remove_branches(
             merged="[magenta]squashed[/]",
             method=self.repo.discover_squashed_branches,
-            target=self.repo.mainline,
             dry_run=dry_run,
             force=True,
         )
@@ -146,20 +152,19 @@ class Application:
     def _remove_branches(
         self,
         merged: str,
-        method: typing.Callable[[str], typing.Set[str]],
-        target: str,
+        method: typing.Callable[[str], typing.Iterable[str]],
         dry_run: bool,
         force: bool,
     ) -> None:
         with Output(merged=merged).status("Finding {merged} branches..."):
-            branches = method(target)
+            branches = set(method(self.repo.mainline))
 
         output = Output(
             one=len(branches),
             branch=p.plural("branch", len(branches)),
             was=p.plural_verb("was", len(branches)),
             merged=merged,
-            target=Output.format_branch(target),
+            target=Output.format_branch(self.repo.mainline),
             items=Output.format_branches(branches),
         )
 
@@ -281,6 +286,7 @@ def finish(app: Application, dry_run: bool, update_remotes: bool) -> None:
     app.update_mainline_branch()
     app.switch_to_mainline_branch()
     app.remove_merged_branches(dry_run=dry_run)
+    app.remove_rebased_branches(dry_run=dry_run)
     app.remove_squashed_branches(dry_run=dry_run)
 
 
@@ -298,6 +304,7 @@ def tidy(app: Application, dry_run: bool, update_remotes: bool) -> None:
     if update_remotes:
         app.update_remotes()
     app.remove_merged_branches(dry_run=dry_run)
+    app.remove_rebased_branches(dry_run=dry_run)
     app.remove_squashed_branches(dry_run=dry_run)
 
 

@@ -30,6 +30,21 @@ def find_merge_base(
     return merge_base
 
 
+def contains_equivalent(
+    repo: git.Repo, upstream: git.refs.Head, head: git.refs.Head
+) -> bool:
+    """
+    Return True if all commits in <head> have an equivalent in <upstream>.
+    https://git-scm.com/docs/git-cherry
+    """
+    logger.info(
+        "Checking if '%(upstream)s' contains all commits from '%(head)s'",
+        {"upstream": upstream, "head": head},
+    )
+    stdout = repo.git.cherry(upstream, head)
+    return all(line[0] == "-" for line in stdout.splitlines())
+
+
 def contains_squash_commit(
     repo: git.Repo,
     a: git.refs.Head,
@@ -44,16 +59,20 @@ def contains_squash_commit(
         logger.debug("Not checking for squash commits, branches are identical")
         return None
 
+    logger.info("Checking if '%(b)s' was squashed into '%(a)s'", {"a": a, "b": b})
+
     merge_base = find_merge_base(repo, a, b)
-    context = {"a": a, "b": b, "m": merge_base.hexsha[:7]}
-
-    logger.info(
-        "Checking if '%(b)s' was squashed into '%(a)s', merge_base=%(m)s",
-        context,
-    )
-
     branch_diff = b.commit.diff(merge_base)
-    for commit in repo.iter_commits(f"{merge_base}...{a.name}"):
+    commits = list(repo.iter_commits(f"{merge_base}...{a.name}"))
+
+    if len(commits) == 1:
+        logger.info(
+            "Skipping branch with one commit, "
+            "squashing and rebasing are equivalent in this case"
+        )
+        return None
+
+    for commit in commits:
         if len(commit.parents) == 0:
             logger.debug("Skipping commit with no parents %(c)s", {"c": commit})
             continue
@@ -63,15 +82,14 @@ def contains_squash_commit(
         else:
             parent = commit.parents[0]
 
-        is_matching_squash_commit = commit.diff(parent) == branch_diff
-
         logger.info(
-            "Checking if '%(b)s' was squashed into '%(a)s' by %(c).7s"
-            "(merge_base=%(m).7s, is_matching_squash_commit=%(i)s)",
-            {**context, "c": commit, "i": is_matching_squash_commit},
+            "Checking if '%(b)s' was squashed into '%(a)s' by %(c).7s",
+            {"a": a, "b": b, "c": commit},
         )
 
-        if is_matching_squash_commit:
+        matches_branch_diff = commit.diff(parent) == branch_diff
+
+        if matches_branch_diff:
             return True
 
     return False
