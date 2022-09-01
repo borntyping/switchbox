@@ -68,15 +68,15 @@ class Repo:
 
     @property
     def mainline(self) -> str:
-        if mainline := self.get("mainline"):
-            return mainline
+        if option := self.get("mainline"):
+            return option.value
 
         return self.detect_mainline()
 
     @property
     def upstream(self) -> str:
-        if upstream := self.get("upstream"):
-            return upstream
+        if option := self.get("upstream"):
+            return option.value
 
         return self.detect_upstream()
 
@@ -110,31 +110,29 @@ class Repo:
 
         raise RepositoryException(f"Could not find an upstream remote for {self}.")
 
-    def get(self, option: str) -> typing.Optional[str]:
+    def get(self, option: str, *, section: str = SECTION) -> typing.Optional[GitOption]:
         with self.gitpython.config_reader() as reader:
-            if reader.has_section(SECTION):
-                if reader.has_option(SECTION, option):
-                    value = reader.get_value(SECTION, option)
+            if reader.has_section(section):
+                if reader.has_option(section, option):
+                    value = reader.get_value(section, option)
 
                     if isinstance(value, float):
                         raise RepositoryException(
                             "Unexpected value for {}.{}: {!r}".format(
-                                SECTION,
-                                option,
-                                value,
+                                section, option, value
                             )
                         )
 
-                    return value
+                    return GitOption(section, option, value)
         return None
 
-    def set(self, option: str, value: str) -> GitOption:
+    def set(self, option: str, value: str, section: str = SECTION) -> GitOption:
         with self.gitpython.config_writer("repository") as writer:
-            if not writer.has_section(SECTION):
-                writer.add_section(SECTION)
-            writer.set(SECTION, option, value)
+            if not writer.has_section(section):
+                writer.add_section(section)
+            writer.set(section, option, value)
 
-        return GitOption(SECTION, option, value)
+        return GitOption(section, option, value)
 
     def options(self) -> typing.Sequence[GitOption]:
         with self.gitpython.config_reader() as reader:
