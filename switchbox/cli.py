@@ -128,13 +128,17 @@ class Application:
             )
 
         with output.status(
-            "Updating branch {default_branch} to match {default_remote_branch}."
+            "Updating branch {default_branch} "
+            "to match {default_branch}/{default_remote}."
         ):
             self.repo.update_branch_from_remote(
                 remote=self.repo.default_remote,
                 branch=self.repo.default_branch,
             )
-        output.done("Updated branch {default_branch} to match {default_remote_branch}.")
+        output.done(
+            "Updated branch {default_branch} "
+            "to match {default_branch}/{default_remote}."
+        )
 
     def switch_default_branch(self) -> None:
         output = Output(**self.context)
@@ -208,12 +212,33 @@ class Application:
             "that {was} {merged} into {target}: {items}."
         )
 
-    def rebase_active_branch(self):
+    def rebase_active_branch(self) -> typing.Tuple[str, str]:
         """Rebase the active branch on top of the remote default branch."""
         output = Output(**self.context)
-        with output.status("Rebasing onto {default_remote_branch}..."):
+        with output.status("Rebasing onto {default_branch}/{default_remote}..."):
+            before = self.repo.active_branch_ref()
             self.repo.rebase(upstream=self.repo.remote_default_branch)
-        output.done("Rebased {active_branch} onto {default_remote_branch}.")
+            after = self.repo.active_branch_ref()
+        output.done("Rebased {active_branch} onto {default_branch}/{default_remote}.")
+        return before, after
+
+    def rebase_and_push_active_branch(self):
+        before, after = self.rebase_active_branch()
+        output = Output(**self.context)
+        with output.status(
+            "Force pushing from {default_branch} "
+            "to {default_branch}/{default_remote}..."
+        ):
+            self.repo.force_push(
+                remote=self.repo.default_remote,
+                local_branch=self.repo.active_branch,
+                remote_branch=self.repo.active_branch,
+                expect=before,
+            )
+        output.done(
+            "Force pushed from {default_branch} "
+            "to {default_branch}/{default_remote}."
+        )
 
 
 @click.group(name="switchbox")
@@ -318,11 +343,32 @@ def finish(app: Application, dry_run: bool, update_remotes: bool) -> None:
 
 @main.command()
 @remote_update_option
+@click.option(
+    "--push/--no-push",
+    "push",
+    default=True,
+    is_flag=True,
+    help="Run 'git push --force-with-lease' after rebasing.",
+)
 @click.pass_obj
-def rebase(app: Application, update_remotes: bool) -> None:
+def rebase(app: Application, update_remotes: bool, push: bool) -> None:
+    """
+    Rebase the active branch, and force push it to the remote branch.
+
+    The active branch is rebased on top of the remote default branch.
+
+    The push is done with '--force-with-lease=<branch>:<before>' where <branch> is the
+    active branch and <before> is the commit SHA of the active branch before the rebase.
+    This ensures we only force push changes if our local state for the active branch
+    exactly matches our remote state for the active branch.
+    """
     if update_remotes:
         app.update_remotes()
-    app.rebase_active_branch()
+
+    if push:
+        app.rebase_and_push_active_branch()
+    else:
+        app.rebase_active_branch()
 
 
 @main.command()

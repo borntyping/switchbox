@@ -244,3 +244,15 @@ class Repo:
 
     def rebase(self, upstream: str) -> None:
         self.gitpython.git.rebase(upstream)
+
+    def force_push(
+        self, remote: str, local_branch: str, remote_branch: str, expect: str
+    ) -> None:
+        self.gitpython.git.push(
+            remote,
+            f"{local_branch}:{remote_branch}",
+            force_with_lease=f"{remote_branch}:{expect}",
+        )
+
+    def active_branch_ref(self) -> str:
+        return self.gitpython.active_branch.commit.hexsha
