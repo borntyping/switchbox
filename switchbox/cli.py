@@ -189,6 +189,16 @@ class Application:
             "that {was} {merged} into {target}: {items}."
         )
 
+    def rebase_mainline_branch(self):
+        """Rebase the active branch on top of"""
+        output = Output(
+            upstream=f"[remote]{self.repo.upstream}[/]/[branch]{self.repo.mainline}[/]",
+            active_branch=f"[branch]{self.repo.active_branch}[/]",
+        )
+        with output.status("Rebasing onto {upstream}..."):
+            self.repo.rebase(self.repo.mainline)
+        output.done("Rebased {active_branch} onto {upstream}.")
+
 
 @click.group(name="switchbox")
 @click.option(
@@ -288,6 +298,15 @@ def finish(app: Application, dry_run: bool, update_remotes: bool) -> None:
     app.remove_merged_branches(dry_run=dry_run)
     app.remove_rebased_branches(dry_run=dry_run)
     app.remove_squashed_branches(dry_run=dry_run)
+
+
+@main.command()
+@remote_update_option
+@click.pass_obj
+def rebase(app: Application, update_remotes: bool) -> None:
+    if update_remotes:
+        app.update_remotes()
+    app.rebase_mainline_branch()
 
 
 @main.command()

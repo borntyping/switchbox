@@ -81,6 +81,10 @@ class Repo:
         return self.detect_upstream()
 
     @property
+    def remote_mainline(self) -> str:
+        return f"{self.upstream}/{self.mainline}"
+
+    @property
     def section(self) -> str:
         return self.config.application
 
@@ -226,3 +230,6 @@ class Repo:
 
         logger.info("Deleting branch %(branch)s", {"branch": branch, "force": force})
         self.gitpython.delete_head(branch, force=force)
+
+    def rebase(self, upstream: str) -> None:
+        self.gitpython.git.rebase(upstream)
