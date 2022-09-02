@@ -31,7 +31,9 @@ def find_merge_base(
 
 
 def contains_equivalent(
-    repo: git.Repo, upstream: git.refs.Head, head: git.refs.Head
+    repo: git.Repo,
+    upstream: git.refs.Head,
+    head: git.refs.Head,
 ) -> bool:
     """
     Return True if all commits in <head> have an equivalent in <upstream>.

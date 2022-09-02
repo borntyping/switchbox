@@ -17,12 +17,12 @@ Usage
 
 Invoke `switchbox` directly or run it via `git switchbox`.
 
-Switchbox commands assume your git repository has a "mainline" branch and an
-"upstream" remote. When Switchbox is used for the first time (or you run
+Switchbox commands assume your git repository has a default branch and a
+default remote. When Switchbox is used for the first time (or you run
 `switchbox setup`) it will find and remember names for these.
 
-* Mainline will default to a branch named `main` or `master`.
-* Upstream will default to a remote named `upstream` or `origin`.
+* The default branch will use a branch named `main` or `master`.
+* The default remote will use a remote named `upstream` or `origin`.
 
 Switchbox options are set in a repository's `.git/config` file under a
 `switchbox` section.
@@ -33,31 +33,31 @@ Show config options that Switchbox has set.
 
 ### `switchbox config init`
 
-Detect a mainline branch and upstream remote, and save them to the repositories
+Detect a default branch and default remote, and save them to the repository's
 git configuration. This will be done automatically when you first use a command
-that works on a mainline branch or upstream remote.
+that works on a default branch or default remote.
 
-### `switchbox config mainline $branch`
+### `switchbox config default-branch $branch`
 
-Change the mainline branch.
+Change the default branch.
 
-### `switchbox config upstream $remote`
+### `switchbox config default-remote $remote`
 
-Change the upstream remote.
+Change the default remote.
 
 ### `switchbox finish [--update/--no-update]`
 
 * Update all git remotes.
-* Update the local mainline branch to match the remote mainline branch.
-* Switch to the mainline branch.
-* Remove branches **merged** into the mainline branch.
-* Remove branches **squashed** into the mainline branch.
+* Update the local default branch to match the remote default branch.
+* Switch to the default branch.
+* Remove branches **merged** into the default branch.
+* Remove branches **squashed** into the default branch.
 
 ### `switchbox tidy [--update/--no-update]`
 
 * Update all git remotes.
-* Remove branches **merged** into the mainline branch.
-* Remove branches **squashed** into the mainline branch.
+* Remove branches **merged** into the default branch.
+* Remove branches **squashed** into the default branch.
 
 ### `switchbox update`
 

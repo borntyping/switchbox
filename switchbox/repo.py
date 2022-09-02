@@ -28,8 +28,8 @@ class GitOption:
 
 @dataclasses.dataclass(frozen=True)
 class Config:
-    mainline_names: typing.Sequence[str] = ("main", "master")
-    upstream_names: typing.Sequence[str] = ("upstream", "origin")
+    default_branch_names: typing.Sequence[str] = ("main", "master")
+    default_remote_names: typing.Sequence[str] = ("upstream", "origin")
     write_config: bool = True
     application: str = "switchbox"
 
@@ -67,54 +67,58 @@ class Repo:
         return self.gitpython.active_branch.name
 
     @property
-    def mainline(self) -> str:
-        if option := self.get("mainline"):
-            return option.value
-
-        return self.detect_mainline()
+    def default_branch(self) -> str:
+        return self.get("default-branch") or self.detect_default_branch()
 
     @property
-    def upstream(self) -> str:
-        if option := self.get("upstream"):
-            return option.value
+    def default_remote(self) -> str:
+        return self.get("default-remote") or self.detect_default_remote()
 
-        return self.detect_upstream()
+    def get_default_branch(self) -> str | None:
+        return self.get("default-branch") or None
+
+    def get_default_remote(self) -> str | None:
+        return self.get("default-remote") or None
 
     @property
-    def remote_mainline(self) -> str:
-        return f"{self.upstream}/{self.mainline}"
+    def remote_default_branch(self) -> str:
+        return f"{self.default_remote}/{self.default_branch}"
 
     @property
     def section(self) -> str:
         return self.config.application
 
-    def detect_mainline(self) -> str:
+    def detect_default_branch(self) -> str:
         if not self.gitpython.heads:
             raise RepositoryException(
                 "Repository has no branches. Is this a new repository?"
             )
 
-        if head := self._first_match(self.gitpython.heads, self.config.mainline_names):
-            self.set("mainline", head.name)
+        if head := self._first_match(
+            items=self.gitpython.heads,
+            names=self.config.default_branch_names,
+        ):
+            self.set("default-branch", head.name)
             return head.name
 
-        raise RepositoryException(f"Could not find a mainline branch for {self}.")
+        raise RepositoryException(f"Could not find a default branch for {self}.")
 
-    def detect_upstream(self) -> str:
+    def detect_default_remote(self) -> str:
         if not self.gitpython.heads:
             raise RepositoryException(
                 "Repository has no remotes. Is this a new repository?"
             )
 
         if remote := self._first_match(
-            self.gitpython.remotes, self.config.upstream_names
+            items=self.gitpython.remotes,
+            names=self.config.default_remote_names,
         ):
-            self.set("upstream", remote.name)
+            self.set("default-remote", remote.name)
             return remote.name
 
-        raise RepositoryException(f"Could not find an upstream remote for {self}.")
+        raise RepositoryException(f"Could not find a default remote for {self}.")
 
-    def get(self, option: str, *, section: str = SECTION) -> typing.Optional[GitOption]:
+    def get(self, option: str, *, section: str = SECTION) -> typing.Optional[str]:
         with self.gitpython.config_reader() as reader:
             if reader.has_section(section):
                 if reader.has_option(section, option):
@@ -127,7 +131,7 @@ class Repo:
                             )
                         )
 
-                    return GitOption(section, option, value)
+                    return value
         return None
 
     def set(self, option: str, value: str, section: str = SECTION) -> GitOption:
@@ -137,6 +141,13 @@ class Repo:
             writer.set(section, option, value)
 
         return GitOption(section, option, value)
+
+    def remove_option(self, option: str, section: str = SECTION) -> bool:
+        with self.gitpython.config_writer("repository") as writer:
+            if writer.has_section(section) and writer.has_option(section, option):
+                writer.remove_option(section, option)
+                return True
+        return False
 
     def options(self) -> typing.Sequence[GitOption]:
         with self.gitpython.config_reader() as reader:
@@ -169,8 +180,8 @@ class Repo:
         self.gitpython.git.branch(branch, f"{remote}/{branch}", force=True)
         # self.repo.git.fetch(remote, f"{branch}:{branch}", "--update-head-ok")
 
-    def switch(self, mainline: str) -> None:
-        self.gitpython.git.switch(mainline)
+    def switch(self, branch: str) -> None:
+        self.gitpython.git.switch(branch)
 
     def discover_merged_branches(self, target: str) -> typing.Set[str]:
         """
@@ -192,8 +203,8 @@ class Repo:
         """
         Find branches rebased into a target branch.
 
-        This uses 'git cherry <mainline> <branch>' to find branches where all commits
-        from <branch> have an equivalent in the <mainline> branch.
+        This uses 'git cherry <default-branch> <branch>' to find branches where all
+        commits from <branch> have an equivalent in the <default-branch> branch.
 
         https://git-scm.com/docs/git-cherry
         """

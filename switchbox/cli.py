@@ -58,7 +58,7 @@ class Output:
         return text.format_map(self.context)
 
     def status(self, text: str) -> rich.status.Status:
-        return rich.status.Status(self.format(text), speed=2.0, spinner="arrow3")
+        return rich.status.Status(self.format(text), speed=2.0)
 
     def done(self, task: str) -> None:
         console.print("[green]✓[/]", self.format(task), highlight=False)
@@ -67,33 +67,51 @@ class Output:
         console.print("[yellow]➔[/]", self.format(task), highlight=False)
 
     @classmethod
-    def format_branch(cls, branch: str) -> str:
-        return f"[branch]{branch}[/]"
+    def format_branch(cls, branch: str | None) -> str:
+        return f"[branch]{branch}[/]" if branch else "[red]UNSET[/]"
 
     @classmethod
     def format_branches(cls, branches: typing.Collection[str]) -> str:
-        return p.join([cls.format_branch(b) for b in sorted(branches)])
+        return p.join([f"[branch]{branch}[/]" for branch in sorted(branches)])
 
     @classmethod
-    def format_remote(cls, branch: str) -> str:
-        return f"[remote]{branch}[/]"
+    def format_remote(cls, remote: str | None) -> str:
+        return f"[remote]{remote}[/]" if remote else "[red]UNSET[/]"
 
 
 @dataclasses.dataclass()
 class Application:
     repo: Repo
 
-    def setup(self) -> None:
-        self.set_mainline(self.repo.detect_mainline())
-        self.set_upstream(self.repo.detect_upstream())
+    def init(self) -> None:
+        self.set_default_branch(self.repo.detect_default_branch())
+        self.set_default_remote(self.repo.detect_default_remote())
+        self.remove_option("upstream")
+        self.remove_option("mainline")
 
-    def set_mainline(self, mainline: str) -> None:
-        option = self.repo.set("mainline", mainline)
+    @property
+    def context(self) -> typing.Dict[str, str]:
+        default_branch = Output.format_branch(self.repo.get_default_branch())
+        default_remote = Output.format_remote(self.repo.get_default_remote())
+        return dict(
+            active_branch=Output.format_branch(self.repo.active_branch),
+            default_branch=default_branch,
+            default_remote=default_remote,
+            default_remote_branch=f"{default_branch}/{default_remote}",
+        )
+
+    def set_default_branch(self, branch: str) -> None:
+        option = self.repo.set("default-branch", branch)
         Output(option=option).done("Set {option} = {option.value}.")
 
-    def set_upstream(self, upstream: str) -> None:
-        option = self.repo.set("upstream", upstream)
+    def set_default_remote(self, remote: str) -> None:
+        option = self.repo.set("default-remote", remote)
         Output(option=option).done("Set {option} = {option.value}.")
+
+    def remove_option(self, option: str) -> None:
+        output = Output(option=option)
+        if self.repo.remove_option(option):
+            output.done("Removed option {option}.")
 
     def update_remotes(self) -> None:
         output = Output()
@@ -101,29 +119,28 @@ class Application:
             self.repo.update_remotes()
         output.done("Updated all remotes.")
 
-    def update_mainline_branch(self) -> None:
-        output = Output(
-            mainline=f"[branch]{self.repo.mainline}[/]",
-            upstream=f"[remote]{self.repo.upstream}[/]/[branch]{self.repo.mainline}[/]",
-        )
+    def update_default_branch(self) -> None:
+        output = Output(**self.context)
 
-        if self.repo.active_branch == self.repo.mainline:
+        if self.repo.active_branch == self.repo.default_branch:
             raise click.ClickException(
-                output.format("Already on the {mainline} branch")
+                output.format("Already on branch {default_branch}")
             )
 
-        with output.status("Updating branch {mainline} to match {upstream}."):
+        with output.status(
+            "Updating branch {default_branch} to match {default_remote_branch}."
+        ):
             self.repo.update_branch_from_remote(
-                remote=self.repo.upstream,
-                branch=self.repo.mainline,
+                remote=self.repo.default_remote,
+                branch=self.repo.default_branch,
             )
-        output.done("Updated branch {mainline} to match {upstream}.")
+        output.done("Updated branch {default_branch} to match {default_remote_branch}.")
 
-    def switch_to_mainline_branch(self) -> None:
-        output = Output(mainline=f"[branch]{self.repo.mainline}[/]")
-        with output.status("Switching to the {mainline} branch..."):
-            self.repo.switch(self.repo.mainline)
-        output.done("Switched to the {mainline} branch.")
+    def switch_default_branch(self) -> None:
+        output = Output(**self.context)
+        with output.status("Switching to the {default_branch} branch..."):
+            self.repo.switch(self.repo.default_branch)
+        output.done("Switched to the {default_branch} branch.")
 
     def remove_merged_branches(self, dry_run: bool = True) -> None:
         self._remove_branches(
@@ -156,15 +173,17 @@ class Application:
         dry_run: bool,
         force: bool,
     ) -> None:
+        default_branch = self.repo.default_branch
+
         with Output(merged=merged).status("Finding {merged} branches..."):
-            branches = set(method(self.repo.mainline))
+            branches = set(method(default_branch))
 
         output = Output(
             one=len(branches),
             branch=p.plural("branch", len(branches)),
             was=p.plural_verb("was", len(branches)),
             merged=merged,
-            target=Output.format_branch(self.repo.mainline),
+            target=Output.format_branch(default_branch),
             items=Output.format_branches(branches),
         )
 
@@ -189,15 +208,12 @@ class Application:
             "that {was} {merged} into {target}: {items}."
         )
 
-    def rebase_mainline_branch(self):
-        """Rebase the active branch on top of"""
-        output = Output(
-            upstream=f"[remote]{self.repo.upstream}[/]/[branch]{self.repo.mainline}[/]",
-            active_branch=f"[branch]{self.repo.active_branch}[/]",
-        )
-        with output.status("Rebasing onto {upstream}..."):
-            self.repo.rebase(self.repo.mainline)
-        output.done("Rebased {active_branch} onto {upstream}.")
+    def rebase_active_branch(self):
+        """Rebase the active branch on top of the remote default branch."""
+        output = Output(**self.context)
+        with output.status("Rebasing onto {default_remote_branch}..."):
+            self.repo.rebase(upstream=self.repo.remote_default_branch)
+        output.done("Rebased {active_branch} onto {default_remote_branch}.")
 
 
 @click.group(name="switchbox")
@@ -245,40 +261,40 @@ def config(ctx: click.Context, app: Application) -> None:
             print(option)
 
 
-@config.command()
+@config.command(name="init")
 @click.pass_obj
 def config_init(app: Application):
     """
-    Find and remember a mainline branch and upstream remote.
+    Find and remember a default branch and default remote.
 
     This will be done automatically when you first use a command that works on a
-    mainline branch or upstream remote.
+    default branch or default remote.
     """
-    app.setup()
+    app.init()
 
 
-@config.command(name="mainline")
-@click.argument("mainline", type=click.STRING)
+@config.command(name="default-branch")
+@click.argument("branch", type=click.STRING)
 @click.pass_obj
-def config_mainline(app: Application, mainline: str) -> None:
+def config_set_default_branch(app: Application, branch: str) -> None:
     """
-    Set the mainline branch.
+    Set the default branch.
 
-    Sets 'switchbox.mainline' in the repository's '.git/config' file.
+    Sets 'switchbox.default-branch' in the repository's '.git/config' file.
     """
-    app.set_mainline(mainline)
+    app.set_default_branch(branch)
 
 
-@config.command(name="upstream")
-@click.argument("upstream", type=click.STRING)
+@config.command(name="default-remote")
+@click.argument("remote", type=click.STRING)
 @click.pass_obj
-def config_upstream(app: Application, upstream: str) -> None:
+def config_set_default_remote(app: Application, remote: str) -> None:
     """
-    Set the upstream remote.
+    Set the default remote.
 
-    Sets 'switchbox.upstream' in the repository's '.git/config' file.
+    Sets 'switchbox.default-remote' in the repository's '.git/config' file.
     """
-    app.set_upstream(upstream)
+    app.set_default_remote(remote)
 
 
 @main.command()
@@ -289,12 +305,12 @@ def finish(app: Application, dry_run: bool, update_remotes: bool) -> None:
     """
     Finish working on a branch.
 
-    Updates the mainline branch, switches to it, and deletes any merged branches.
+    Updates the default branch, switches to it, and deletes any merged branches.
     """
     if update_remotes:
         app.update_remotes()
-    app.update_mainline_branch()
-    app.switch_to_mainline_branch()
+    app.update_default_branch()
+    app.switch_default_branch()
     app.remove_merged_branches(dry_run=dry_run)
     app.remove_rebased_branches(dry_run=dry_run)
     app.remove_squashed_branches(dry_run=dry_run)
@@ -306,7 +322,7 @@ def finish(app: Application, dry_run: bool, update_remotes: bool) -> None:
 def rebase(app: Application, update_remotes: bool) -> None:
     if update_remotes:
         app.update_remotes()
-    app.rebase_mainline_branch()
+    app.rebase_active_branch()
 
 
 @main.command()
@@ -346,8 +362,8 @@ def tidy(app: Application, dry_run: bool, update_remotes: bool) -> None:
     """
     Cleans up branches.
 
-    Removes upstream branches that no longer exist and local branches that have been
-    merged into the mainline branch.
+    Removes remote branches that no longer exist and local branches that have been
+    merged into the default branch.
     """
     if update_remotes:
         app.update_remotes()

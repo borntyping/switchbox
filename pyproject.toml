@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "switchbox"
-version = "0.2.0"
+version = "0.3.0"
 readme = "README.md"
 description = "Tools for working with Git repositories."
 homepage = "https://pypi.org/project/switchbox/"
