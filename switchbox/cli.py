@@ -1,3 +1,4 @@
+import collections
 import dataclasses
 import logging
 import os
@@ -47,12 +48,21 @@ def join(items: typing.Collection) -> str:
     return p.join(list(sorted(str(item) for item in items)))
 
 
+OutputContextValue = typing.Union[typing.Callable[[], typing.Any], typing.Any]
+
+
+class OutputContext(collections.UserDict[str, OutputContextValue]):
+    def __getitem__(self, item: str) -> str:
+        value = super().__getitem__(item)
+        return value() if callable(value) else value
+
+
 @dataclasses.dataclass()
 class Output:
-    context: typing.Mapping[str, typing.Any]
+    context: OutputContext
 
-    def __init__(self, **context: typing.Any) -> None:
-        self.context = context
+    def __init__(self, **context: OutputContextValue) -> None:
+        self.context = OutputContext(context)
 
     def format(self, text: str) -> str:
         return text.format_map(self.context)
@@ -90,14 +100,15 @@ class Application:
         self.remove_option("mainline")
 
     @property
-    def context(self) -> typing.Dict[str, str]:
-        default_branch = Output.format_branch(self.repo.get_default_branch())
-        default_remote = Output.format_remote(self.repo.get_default_remote())
-        return dict(
-            active_branch=Output.format_branch(self.repo.active_branch),
-            default_branch=default_branch,
-            default_remote=default_remote,
-            default_remote_branch=f"{default_branch}/{default_remote}",
+    def context(self) -> OutputContext:
+        return OutputContext(
+            active_branch=lambda: Output.format_branch(self.repo.active_branch),
+            default_branch=lambda: Output.format_branch(self.repo.default_branch),
+            default_remote=lambda: Output.format_remote(self.repo.default_remote),
+            default_remote_branch=lambda: "{}/{}".format(
+                Output.format_branch(self.repo.default_branch),
+                Output.format_remote(self.repo.default_remote),
+            ),
         )
 
     def set_default_branch(self, branch: str) -> None:

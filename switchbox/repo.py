@@ -74,12 +74,6 @@ class Repo:
     def default_remote(self) -> str:
         return self.get("default-remote") or self.detect_default_remote()
 
-    def get_default_branch(self) -> str | None:
-        return self.get("default-branch") or None
-
-    def get_default_remote(self) -> str | None:
-        return self.get("default-remote") or None
-
     @property
     def remote_default_branch(self) -> str:
         return f"{self.default_remote}/{self.default_branch}"
