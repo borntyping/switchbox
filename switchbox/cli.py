@@ -123,9 +123,7 @@ class Application:
         output = Output(**self.context)
 
         if self.repo.active_branch == self.repo.default_branch:
-            raise click.ClickException(
-                output.format("Already on branch {default_branch}")
-            )
+            raise click.ClickException(f"Already on branch {self.repo.default_branch}")
 
         with output.status(
             "Updating branch {default_branch} "
