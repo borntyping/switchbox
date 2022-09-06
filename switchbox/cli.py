@@ -399,13 +399,7 @@ def sparse(app: Application) -> None:
         )
     output.done("Configured sparse-checkout")
     with output.status("Reapplying sparse-checkout..."):
-        app.repo.gitpython.git._call_process(
-            "sparse-checkout",
-            "set",
-            "/*",
-            "!/.idea/",
-            insert_kwargs_after="set",
-        )
+        app.repo.gitpython.git._call_process("sparse-checkout", "reapply")
     output.done("Reapplied sparse-checkout.")
 
 
