@@ -278,7 +278,15 @@ def main(ctx: click.Context, path: typing.Optional[os.PathLike], verbose: int) -
     }
     logging.basicConfig(level=verbosity[verbose])
 
-    ctx.obj = Application(repo=Repo(config=Config(), gitpython=git.Repo(path)))
+    ctx.obj = Application(
+        repo=Repo(
+            config=Config(),
+            gitpython=git.Repo(
+                path=path,
+                search_parent_directories=True,
+            ),
+        )
+    )
 
 
 @main.group(invoke_without_command=True)
