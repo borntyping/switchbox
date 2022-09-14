@@ -1,4 +1,5 @@
 import logging
+import typing
 
 import git
 
@@ -47,6 +48,14 @@ def contains_equivalent(
     return all(line[0] == "-" for line in stdout.splitlines())
 
 
+def commits(
+    repo: git.Repo,
+    r1: git.objects.Commit | git.refs.Head,
+    r2: git.objects.Commit | git.refs.Head,
+) -> list[git.objects.Commit]:
+    return list(repo.iter_commits(f"{r1}..{r2}"))
+
+
 def contains_squash_commit(
     repo: git.Repo,
     a: git.refs.Head,
@@ -65,16 +74,15 @@ def contains_squash_commit(
 
     merge_base = find_merge_base(repo, a, b)
     branch_diff = b.commit.diff(merge_base)
-    commits = list(repo.iter_commits(f"{merge_base}...{a.name}"))
 
-    if len(commits) == 1:
+    if len(commits(repo, r1=merge_base, r2=b)) == 1:
         logger.info(
             "Skipping branch with one commit, "
             "squashing and rebasing are equivalent in this case"
         )
         return None
 
-    for commit in commits:
+    for commit in commits(repo, r1=merge_base, r2=a):
         if len(commit.parents) == 0:
             logger.debug("Skipping commit with no parents %(c)s", {"c": commit})
             continue
