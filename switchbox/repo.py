@@ -32,6 +32,7 @@ class Config:
     default_remote_names: typing.Sequence[str] = ("upstream", "origin")
     write_config: bool = True
     application: str = "switchbox"
+    sparse_checkout_exclude: typing.Sequence[str] = ("/.idea/",)
 
 
 class RepositoryException(click.ClickException):
@@ -250,3 +251,23 @@ class Repo:
 
     def active_branch_ref(self) -> str:
         return self.gitpython.active_branch.commit.hexsha
+
+    def sparse_checkout_set(self) -> tuple[list[str], list[str]]:
+        include = ["/*"]
+        exclude = [f"!{path}" for path in self.config.sparse_checkout_exclude]
+        logger.info(
+            "Setting sparse-checkout paths "
+            "to include %(include)r and exclude %(exclude)r",
+            {"include": include, "exclude": exclude},
+        )
+        self.gitpython.git._call_process(
+            "sparse-checkout",
+            "set",
+            *include,
+            *exclude,
+            insert_kwargs_after="set",
+        )
+        return include, exclude
+
+    def sparse_checkout_reapply(self) -> None:
+        self.gitpython.git._call_process("sparse-checkout", "reapply")

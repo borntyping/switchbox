@@ -73,6 +73,12 @@ class Output:
     def done(self, task: str) -> None:
         console.print("[green]✓[/]", self.format(task), highlight=False)
 
+    def enabled(self, task: str) -> None:
+        console.print("[yellow]✓[/]", self.format(task), highlight=False)
+
+    def disabled(self, task: str) -> None:
+        console.print("[red]✓[/]", self.format(task), highlight=False)
+
     def dry_run(self, task: str) -> None:
         console.print("[yellow]➔[/]", self.format(task), highlight=False)
 
@@ -249,6 +255,17 @@ class Application:
             "to {default_branch}/{default_remote}."
         )
 
+    def configure_sparse_checkout(self) -> None:
+        output = Output()
+        with output.status("Configuring sparse-checkout..."):
+            include, exclude = self.repo.sparse_checkout_set()
+        output.done("Configured sparse-checkout.")
+        output.enabled("Including {}.".format(join(include)))
+        output.disabled("Excluding {}.".format(join(exclude)))
+        with output.status("Reapplying sparse-checkout..."):
+            self.repo.sparse_checkout_reapply()
+        output.done("Reapplied sparse-checkout.")
+
 
 @click.group(name="switchbox")
 @click.option(
@@ -396,19 +413,7 @@ def sparse(app: Application) -> None:
 
     Excludes /.idea/ from being checked out.
     """
-    output = Output()
-    with output.status("Configuring sparse-checkout..."):
-        app.repo.gitpython.git._call_process(
-            "sparse-checkout",
-            "set",
-            "/*",
-            "!/.idea/",
-            insert_kwargs_after="set",
-        )
-    output.done("Configured sparse-checkout")
-    with output.status("Reapplying sparse-checkout..."):
-        app.repo.gitpython.git._call_process("sparse-checkout", "reapply")
-    output.done("Reapplied sparse-checkout.")
+    app.configure_sparse_checkout()
 
 
 @main.command()
