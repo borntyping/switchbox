@@ -266,6 +266,7 @@ class Repo:
             *include,
             *exclude,
             insert_kwargs_after="set",
+            no_cone=True,
         )
         return include, exclude
 
