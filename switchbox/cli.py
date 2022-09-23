@@ -135,7 +135,7 @@ def finish(app: Application, dry_run: bool, update_remotes: bool) -> None:
 @click.option(
     "--push/--no-push",
     "push",
-    default=True,
+    default=False,
     is_flag=True,
     help="Run 'git push --force-with-lease' after rebasing.",
 )
