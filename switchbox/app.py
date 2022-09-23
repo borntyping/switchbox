@@ -213,11 +213,11 @@ class Application:
     def rebase_active_branch(self) -> typing.Tuple[str, str]:
         """Rebase the active branch on top of the remote default branch."""
         output = Output(**self.context)
-        with output.status("Rebasing onto {default_branch}/{default_remote}..."):
+        with output.status("Rebasing onto {default_remote}/{default_branch}..."):
             before = self.repo.active_branch_ref()
             self.repo.rebase(upstream=self.repo.remote_default_branch)
             after = self.repo.active_branch_ref()
-        output.done("Rebased {active_branch} onto {default_branch}/{default_remote}.")
+        output.done("Rebased {active_branch} onto {default_remote}/{default_branch}.")
         return before, after
 
     def rebase_and_push_active_branch(self):
