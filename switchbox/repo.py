@@ -176,6 +176,13 @@ class Repo:
         # self.repo.git.fetch(remote, f"{branch}:{branch}", "--update-head-ok")
 
     def switch(self, branch: str) -> None:
+        if self.gitpython.active_branch.name == branch:
+            logger.info(
+                "Not switching to branch %(branch), already on it",
+                {"branch", branch},
+            )
+            return
+
         self.gitpython.git.switch(branch)
 
     def discover_merged_branches(self, target: str) -> typing.Set[str]:
