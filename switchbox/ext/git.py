@@ -6,6 +6,18 @@ import git
 logger = logging.getLogger(__name__)
 
 
+class GitException(Exception):
+    pass
+
+
+class NoMergeBase(GitException):
+    pass
+
+
+class MultipleMergeBases(GitException):
+    pass
+
+
 def find_merge_base(
     repo: git.Repo,
     a: git.refs.Head,
@@ -14,19 +26,19 @@ def find_merge_base(
     merge_bases = repo.merge_base(a, b)
 
     if len(merge_bases) == 0:
-        raise Exception(
+        raise NoMergeBase(
             "No merge base found for %(a).7s and %(b).7s" % {"a": a, "b": b}
         )
 
     if len(merge_bases) >= 2:
-        raise Exception(
+        raise MultipleMergeBases(
             "Multiple merge bases found for %(a).7s and %(b).7s" % {"a": a, "b": b}
         )
 
     merge_base = merge_bases[0]
 
     if not isinstance(merge_base, git.objects.commit.Commit):
-        raise Exception(f"Unknown merge base type: {merge_base!r}")
+        raise GitException(f"Unknown merge base type: {merge_base!r}")
 
     return merge_base
 
@@ -72,7 +84,11 @@ def contains_squash_commit(
 
     logger.info("Checking if '%(b)s' was squashed into '%(a)s'", {"a": a, "b": b})
 
-    merge_base = find_merge_base(repo, a, b)
+    try:
+        merge_base = find_merge_base(repo, a, b)
+    except NoMergeBase:
+        return False
+
     branch_diff = b.commit.diff(merge_base)
 
     if len(commits(repo, r1=merge_base, r2=b)) == 1:
