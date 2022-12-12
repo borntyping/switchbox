@@ -122,12 +122,9 @@ class Application:
     def update_default_branch(self) -> None:
         output = Output(**self.context)
 
-        if self.repo.active_branch == self.repo.default_branch:
-            raise click.ClickException(f"Already on branch {self.repo.default_branch}")
-
         with output.status(
             "Updating branch {default_branch} "
-            "to match {default_branch}/{default_remote}."
+            "to match {default_remote}/{default_branch}."
         ):
             self.repo.update_branch_from_remote(
                 remote=self.repo.default_remote,
@@ -140,6 +137,11 @@ class Application:
 
     def switch_default_branch(self) -> None:
         output = Output(**self.context)
+
+        if self.repo.active_branch == self.repo.default_branch:
+            output.done("Already on the {default_branch} branch.")
+            return
+
         with output.status("Switching to the {default_branch} branch..."):
             self.repo.switch(self.repo.default_branch)
         output.done("Switched to the {default_branch} branch.")

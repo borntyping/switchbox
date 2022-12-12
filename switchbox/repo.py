@@ -172,8 +172,10 @@ class Repo:
         )
 
     def update_branch_from_remote(self, remote: str, branch: str) -> None:
-        self.gitpython.git.branch(branch, f"{remote}/{branch}", force=True)
-        # self.repo.git.fetch(remote, f"{branch}:{branch}", "--update-head-ok")
+        if self.gitpython.active_branch.name == branch:
+            self.gitpython.remotes[remote].pull()
+        else:
+            self.gitpython.git.branch(branch, f"{remote}/{branch}", force=True)
 
     def switch(self, branch: str) -> None:
         if self.gitpython.active_branch.name == branch:
