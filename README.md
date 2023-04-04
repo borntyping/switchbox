@@ -3,6 +3,8 @@ switchbox
 
 A collection of small tools for git workflows.
 
+![A screenshot displaying the output of 'switchbox finish'.](./docs/screenshot.png)
+
 Installation
 ------------
 
