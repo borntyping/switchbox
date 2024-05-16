@@ -190,11 +190,18 @@ def tidy(app: Application, dry_run: bool, update_remotes: bool) -> None:
 
 
 @main.command()
+@remote_update_option
 @click.pass_obj
-def update(app: Application) -> None:
+def update(app: Application, update_remotes: bool) -> None:
     """
-    Update all git remotes.
+    Update the default branch.
 
-    Just runs 'git remote update --prune'.
+    Remotes are updated with 'git remote update --prune'.
+
+    If the repository is currently on the default branch it will be pulled. If
+    the repository is on any other branch, it will be edited to point at the
+    same commit as the upstream default branch.
     """
-    app.update_remotes()
+    if update_remotes:
+        app.update_remotes()
+    app.update_default_branch()
