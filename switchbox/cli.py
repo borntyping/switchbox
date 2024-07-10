@@ -1,3 +1,4 @@
+import itertools
 import logging
 import os
 import typing
@@ -61,18 +62,12 @@ def main(ctx: click.Context, path: typing.Optional[os.PathLike], verbose: int) -
     )
 
 
-@main.group(invoke_without_command=True)
-@click.pass_obj
-@click.pass_context
-def config(ctx: click.Context, app: Application) -> None:
+@main.group()
+def config() -> None:
     """
-    Manage config options.
-
-    Will display the git config options used by switchbox if no subcommand is given.
+    Manage options used by switchbox stored in '.git/config'.
     """
-    if ctx.invoked_subcommand is None:
-        for option in app.repo.options():
-            print(option)
+    pass
 
 
 @config.command(name="init")
@@ -85,6 +80,15 @@ def config_init(app: Application):
     default branch or default remote.
     """
     app.init()
+
+
+@config.command(name="show")
+@click.pass_obj
+def config_show(app: Application):
+    """
+    Display the git config options used by switchbox.
+    """
+    print(app.repo.get_config())
 
 
 @config.command(name="default-branch")

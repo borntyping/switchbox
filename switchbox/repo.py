@@ -144,14 +144,18 @@ class Repo:
                 return True
         return False
 
-    def options(self) -> typing.Sequence[GitOption]:
+    def get_config(self) -> str:
+        lines = []
+
         with self.gitpython.config_reader() as reader:
             if not reader.has_section(SECTION):
-                return []
-            return [
-                GitOption(SECTION, option, value)
-                for option, value in reader.items(SECTION)
-            ]
+                return ""
+
+            lines.append(f"[{SECTION}]")
+            for option, value in reader.items(SECTION):
+                lines.append(f"\t{option} = {value}")
+
+        return "\n".join(lines)
 
     @staticmethod
     def _first_match(
