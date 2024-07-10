@@ -6,16 +6,12 @@ jobs:
   lint:
     name: "🐍 Lint Python modules"
     runs-on: "ubuntu-latest"
-    strategy:
-      matrix:
-        python-version:
-          - "3.12"
     steps:
       - uses: "actions/checkout@v4"
-      - name: "🐍 Set up Python ${{ matrix.python-version }}"
+      - name: "🐍 Set up Python"
         uses: "actions/setup-python@v5"
         with:
-          python-version: "${{ matrix.python-version }}"
+          python-version: "3.12"
           allow-prereleases: true
       - name: "🐍 Display Python version"
         run: "python --version"
@@ -63,16 +59,12 @@ jobs:
     environment: "release"
     permissions:
       id-token: "write"
-    strategy:
-      matrix:
-        python-version:
-          - "3.12"
     steps:
       - uses: "actions/checkout@v4"
-      - name: "🐍 Set up Python ${{ matrix.python-version }}"
+      - name: "🐍 Set up Python"
         uses: "actions/setup-python@v5"
         with:
-          python-version: "${{ matrix.python-version }}"
+          python-version: "3.12"
           allow-prereleases: true
       - name: "🐍 Display Python version"
         run: "python --version"
