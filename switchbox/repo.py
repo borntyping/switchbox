@@ -6,12 +6,6 @@ import typing
 import click
 import git
 
-from switchbox.branches import (
-    MergedBranchesStrategy,
-    RebasedBranchesStrategy,
-    SquashedBranchesStrategy,
-)
-
 logger = logging.getLogger(__name__)
 
 F = typing.TypeVar("F", bound=typing.Callable)
@@ -187,15 +181,6 @@ class Repo:
 
         self.gitpython.git.switch(branch)
 
-    def discover_merged_branches(self, upstream: str) -> MergedBranchesStrategy:
-        return MergedBranchesStrategy(self.gitpython, self.gitpython.heads[upstream])
-
-    def discover_rebased_branches(self, upstream: str) -> RebasedBranchesStrategy:
-        return RebasedBranchesStrategy(self.gitpython, self.gitpython.heads[upstream])
-
-    def discover_squashed_branches(self, upstream: str) -> SquashedBranchesStrategy:
-        return SquashedBranchesStrategy(self.gitpython, self.gitpython.heads[upstream])
-
     def rebase(self, upstream: str) -> None:
         self.gitpython.git.rebase(upstream, update_refs=True)
 
@@ -228,3 +213,14 @@ class Repo:
 
     def sparse_checkout_reapply(self) -> None:
         self.gitpython.git._call_process("sparse-checkout", "reapply")
+
+    def delete_branches(self, heads: typing.Sequence[git.Head], force: bool = False) -> None:
+        for head in heads:
+            if self.gitpython.active_branch == head:
+                raise Exception("Refusing to remove the active branch")
+
+            logger.info(
+                "Deleting head %(branch)s",
+                {"head": head.name, "force": force},
+            )
+            self.gitpython.delete_head(head, force=force)

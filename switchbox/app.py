@@ -2,6 +2,7 @@ import collections
 import dataclasses
 import typing
 
+import git
 import inflect
 import rich
 import rich.console
@@ -10,8 +11,7 @@ import rich.status
 import rich.table
 import rich.theme
 
-from switchbox.branches import BranchesItem, BranchesStrategy
-from switchbox.ext.rich import advance
+from switchbox.plan import MaybeDeletePlan
 from switchbox.repo import Repo
 
 console = rich.console.Console(
@@ -62,7 +62,8 @@ class Output:
     def progress() -> rich.progress.Progress:
         return rich.progress.Progress(
             rich.progress.SpinnerColumn(
-                finished_text="[cyan]•[/]",
+                style="bar.complete",
+                finished_text="[bar.finished]➔[/]",
             ),
             rich.progress.TextColumn(
                 text_format="[progress.description]{task.description}",
@@ -163,46 +164,48 @@ class Application:
         output.done("Switched to the {default_branch} branch.")
 
     def remove_branches(self, dry_run: bool = True) -> None:
-        upstream = self.repo.default_branch
-        strategies: typing.Sequence[tuple[str, BranchesStrategy, list[BranchesItem]]] = [
-            ("[green]merged[/]", self.repo.discover_merged_branches(upstream), []),
-            ("[yellow]rebased[/]", self.repo.discover_rebased_branches(upstream), []),
-            ("[magenta]squashed[/]", self.repo.discover_squashed_branches(upstream), []),
+        target = self.repo.gitpython.heads[self.repo.default_branch]
+
+        strategies: typing.Sequence[tuple[str, list[MaybeDeletePlan], list[git.Head], bool]] = [
+            ("[green]merged[/]", MaybeDeletePlan.merged(self.repo.gitpython, target), [], False),
+            ("[yellow]rebased[/]", MaybeDeletePlan.rebased(self.repo.gitpython, target), [], True),
+            ("[magenta]squashed[/]", MaybeDeletePlan.squashed(self.repo.gitpython, target), [], True),
         ]
 
         with Output.progress() as progress:
-            for merged, strategy, items in strategies:
+            for merged, plans, delete, _ in strategies:
                 task = progress.add_task(f"Finding {merged} commits...", item="")
-                items = [item for item in strategy.generate()]
 
-                progress.update(task, completed=0, total=len(items))
-                items[:] = [item for item in advance(items, progress, task) if strategy.filter(item)]
-                progress.update(task, item="")
+                progress.update(task, total=sum(plan.count() for plan in plans))
 
-        for merged, strategy, items in strategies:
+                completed = 0
+                for plan in plans:
+                    for i, step in enumerate(plan.steps, start=1):
+                        progress.update(task, completed=completed + i, item=str(step))
+                        if step.delete():
+                            delete.append(step.branch)
+                            break
+                    completed += plan.count()
+                    progress.update(task, completed=completed, item="")
+
+        for merged, _, delete, force in strategies:
             output = Output(
                 merged=merged,
-                one=len(items),
-                branch=p.plural("branch", len(items)),
-                was=p.plural_verb("was", len(items)),
+                one=len(delete),
+                branch=p.plural("branch", len(delete)),
+                was=p.plural_verb("was", len(delete)),
                 target=Output.format_branch(self.repo.default_branch),
-                items=Output.format_branches([item.head.name for item in items]),
+                items=Output.format_branches([head.name for head in delete]),
             )
 
-            if not items:
+            if not delete:
                 output.done("There are no branches that have been {merged} into {target}.")
-                continue
-
-            if dry_run:
-                output.dry_run(
-                    "Found {one} {branch} " "that {was} {merged} into {target} " "and can be removed: {items}."
-                )
-                continue
-
-            with output.status("Removing {merged} {branch}..."):
-                strategy.delete(items)
-
-            output.done("Found and removed {one} {branch} " "that {was} {merged} into {target}: {items}.")
+            elif dry_run:
+                output.dry_run("Found {one} {branch} that {was} {merged} into {target} and can be removed: {items}.")
+            else:
+                with output.status("Removing {merged} {branch}..."):
+                    self.repo.delete_branches(delete, force=force)
+                output.done("Found and removed {one} {branch} " "that {was} {merged} into {target}: {items}.")
 
     def rebase_active_branch(self) -> typing.Tuple[str, str]:
         """Rebase the active branch on top of the remote default branch."""
