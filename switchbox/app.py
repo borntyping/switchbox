@@ -2,13 +2,16 @@ import collections
 import dataclasses
 import typing
 
-import click
 import inflect
 import rich
 import rich.console
+import rich.progress
 import rich.status
+import rich.table
 import rich.theme
 
+from switchbox.branches import BranchesItem, BranchesStrategy
+from switchbox.ext.rich import advance
 from switchbox.repo import Repo
 
 console = rich.console.Console(
@@ -33,6 +36,8 @@ def join(items: typing.Collection) -> str:
 
 p = inflect.engine()
 
+T = typing.TypeVar("T")
+
 
 class OutputContext(collections.UserDict[str, OutputContextValue]):
     def __getitem__(self, item: str) -> str:
@@ -52,6 +57,25 @@ class Output:
 
     def status(self, text: str) -> rich.status.Status:
         return rich.status.Status(self.format(text), speed=2.0)
+
+    @staticmethod
+    def progress() -> rich.progress.Progress:
+        return rich.progress.Progress(
+            rich.progress.SpinnerColumn(
+                finished_text="[cyan]•[/]",
+            ),
+            rich.progress.TextColumn(
+                text_format="[progress.description]{task.description}",
+                table_column=rich.table.Column(width=30),
+            ),
+            rich.progress.BarColumn(),
+            rich.progress.TaskProgressColumn(),
+            rich.progress.MofNCompleteColumn(
+                table_column=rich.table.Column(width=9, justify="right")
+            ),
+            rich.progress.TimeRemainingColumn(),
+            rich.progress.TextColumn("{task.fields[item]}"),
+        )
 
     def done(self, task: str) -> None:
         console.print("[green]✓[/]", self.format(task), highlight=False)
@@ -146,71 +170,64 @@ class Application:
             self.repo.switch(self.repo.default_branch)
         output.done("Switched to the {default_branch} branch.")
 
-    def remove_merged_branches(self, dry_run: bool = True) -> None:
-        self._remove_branches(
-            merged="[green]merged[/]",
-            method=self.repo.discover_merged_branches,
-            dry_run=dry_run,
-            force=False,
-        )
+    def remove_branches(self, dry_run: bool = True) -> None:
+        upstream = self.repo.default_branch
+        strategies: typing.Sequence[
+            tuple[str, BranchesStrategy, list[BranchesItem]]
+        ] = [
+            ("[green]merged[/]", self.repo.discover_merged_branches(upstream), []),
+            ("[yellow]rebased[/]", self.repo.discover_rebased_branches(upstream), []),
+            (
+                "[magenta]squashed[/]",
+                self.repo.discover_squashed_branches(upstream),
+                [],
+            ),
+        ]
 
-    def remove_rebased_branches(self, dry_run: bool = True) -> None:
-        self._remove_branches(
-            merged="[yellow]rebased[/]",
-            method=self.repo.discover_rebased_branches,
-            dry_run=dry_run,
-            force=True,
-        )
+        with Output.progress() as progress:
+            for merged, strategy, items in strategies:
+                task = progress.add_task(f"Finding {merged} commits...", item="")
+                items = [item for item in strategy.generate()]
 
-    def remove_squashed_branches(self, dry_run: bool = True) -> None:
-        self._remove_branches(
-            merged="[magenta]squashed[/]",
-            method=self.repo.discover_squashed_branches,
-            dry_run=dry_run,
-            force=True,
-        )
+                progress.update(task, completed=0, total=len(items))
+                items[:] = [
+                    item
+                    for item in advance(items, progress, task)
+                    if strategy.filter(item)
+                ]
+                progress.update(task, item="")
 
-    def _remove_branches(
-        self,
-        merged: str,
-        method: typing.Callable[[str], typing.Iterable[str]],
-        dry_run: bool,
-        force: bool,
-    ) -> None:
-        default_branch = self.repo.default_branch
-
-        with Output(merged=merged).status("Finding {merged} branches..."):
-            branches = set(method(default_branch))
-
-        output = Output(
-            one=len(branches),
-            branch=p.plural("branch", len(branches)),
-            was=p.plural_verb("was", len(branches)),
-            merged=merged,
-            target=Output.format_branch(default_branch),
-            items=Output.format_branches(branches),
-        )
-
-        if not branches:
-            output.done("There are no branches that have been {merged} into {target}.")
-            return
-
-        if dry_run:
-            output.dry_run(
-                "Found {one} {branch} "
-                "that {was} {merged} into {target} "
-                "and can be removed: {items}."
+        for merged, strategy, items in strategies:
+            output = Output(
+                merged=merged,
+                one=len(items),
+                branch=p.plural("branch", len(items)),
+                was=p.plural_verb("was", len(items)),
+                target=Output.format_branch(self.repo.default_branch),
+                items=Output.format_branches([item.head.name for item in items]),
             )
-            return
 
-        with output.status("Removing {merged} {branch}..."):
-            for branch in branches:
-                self.repo.remove_branch(branch, force=force)
+            if not items:
+                output.done(
+                    "There are no branches that have been {merged} into {target}."
+                )
+                continue
 
-        output.done(
-            "Found and removed {one} {branch} "
-            "that {was} {merged} into {target}: {items}."
-        )
+            if dry_run:
+                output.dry_run(
+                    "Found {one} {branch} "
+                    "that {was} {merged} into {target} "
+                    "and can be removed: {items}."
+                )
+                continue
+
+            with output.status("Removing {merged} {branch}..."):
+                strategy.delete(items)
+
+            output.done(
+                "Found and removed {one} {branch} "
+                "that {was} {merged} into {target}: {items}."
+            )
 
     def rebase_active_branch(self) -> typing.Tuple[str, str]:
         """Rebase the active branch on top of the remote default branch."""

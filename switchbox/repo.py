@@ -6,7 +6,11 @@ import typing
 import click
 import git
 
-from switchbox.ext.git import contains_equivalent, contains_squash_commit
+from switchbox.branches import (
+    MergedBranchesStrategy,
+    RebasedBranchesStrategy,
+    SquashedBranchesStrategy,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -191,64 +195,14 @@ class Repo:
 
         self.gitpython.git.switch(branch)
 
-    def discover_merged_branches(self, target: str) -> typing.Set[str]:
-        """
-        Find branches merged into a target branch.
+    def discover_merged_branches(self, upstream: str) -> MergedBranchesStrategy:
+        return MergedBranchesStrategy(self.gitpython, self.gitpython.heads[upstream])
 
-        This uses 'git branch --merged' to find merged branches.
-        """
+    def discover_rebased_branches(self, upstream: str) -> RebasedBranchesStrategy:
+        return RebasedBranchesStrategy(self.gitpython, self.gitpython.heads[upstream])
 
-        rc, stdout, stderr = self.gitpython.git.branch(
-            "--list",
-            "--format=%(refname:short)",
-            "--merged",
-            target,
-            with_extended_output=True,
-        )
-        return {line.lstrip() for line in stdout.splitlines()} - {target}
-
-    def discover_rebased_branches(self, target: str) -> typing.Iterable[str]:
-        """
-        Find branches rebased into a target branch.
-
-        This uses 'git cherry <default-branch> <branch>' to find branches where all
-        commits from <branch> have an equivalent in the <default-branch> branch.
-
-        https://git-scm.com/docs/git-cherry
-        """
-        upstream = self.gitpython.heads[target]
-        for branch in self.gitpython.heads:
-            if branch.name == target:
-                continue
-
-            if contains_equivalent(self.gitpython, upstream=upstream, head=branch):
-                logger.debug(
-                    "All commits in %(branch)s have an equivalent in %(target)s",
-                    {"branch": branch, "target": target},
-                )
-                yield branch.name
-
-    def discover_squashed_branches(self, target: str) -> typing.Iterable[str]:
-        a = self.gitpython.heads[target]
-
-        for branch in self.gitpython.heads:
-            if branch.name == target:
-                continue
-
-            if contains_squash_commit(self.gitpython, a=a, b=branch):
-                logger.debug(
-                    "Branch %(target)s contains a commit "
-                    "squashing all changes from %(branch)s",
-                    {"branch": branch, "target": target},
-                )
-                yield branch.name
-
-    def remove_branch(self, branch: str, *, force: bool = False) -> None:
-        if self.gitpython.active_branch.name == branch:
-            raise Exception("Refusing to remove the active branch")
-
-        logger.info("Deleting branch %(branch)s", {"branch": branch, "force": force})
-        self.gitpython.delete_head(branch, force=force)
+    def discover_squashed_branches(self, upstream: str) -> SquashedBranchesStrategy:
+        return SquashedBranchesStrategy(self.gitpython, self.gitpython.heads[upstream])
 
     def rebase(self, upstream: str) -> None:
         self.gitpython.git.rebase(upstream, update_refs=True)

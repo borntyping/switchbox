@@ -18,6 +18,17 @@ class MultipleMergeBases(GitException):
     pass
 
 
+def merged(repo: git.Repo, into: git.Head) -> typing.Sequence[git.Head]:
+    rc, stdout, stderr = repo.git.branch(
+        "--list",
+        "--format=%(refname:short)",
+        "--merged",
+        into.name,
+        with_extended_output=True,
+    )
+    return [repo.heads[line.lstrip()] for line in stdout.splitlines()]
+
+
 def find_merge_base(
     repo: git.Repo,
     a: git.refs.Head,
@@ -68,6 +79,50 @@ def commits(
     return list(repo.iter_commits(f"{r1}..{r2}"))
 
 
+def potential_squash_commits(
+    repo: git.Repo,
+    a: git.refs.Head,
+    b: git.refs.Head,
+) -> typing.Sequence[tuple[git.Commit, git.DiffIndex]]:
+    if a == b:
+        logger.debug("Not checking for squash commits, branches are identical")
+        return []
+
+    logger.info("Checking if '%(b)s' was squashed into '%(a)s'", {"a": a, "b": b})
+
+    try:
+        merge_base = find_merge_base(repo, a, b)
+    except NoMergeBase:
+        return []
+
+    diff = b.commit.diff(merge_base)
+
+    if len(commits(repo, r1=merge_base, r2=b)) == 1:
+        logger.info(
+            "Skipping branch with one commit, "
+            "squashing and rebasing are equivalent in this case"
+        )
+        return []
+
+    return [(commit, diff) for commit in commits(repo, r1=merge_base, r2=a)]
+
+
+def is_squash_commit(repo: git.Repo, commit: git.Commit, diff: git.DiffIndex):
+    """
+    Check if a commit matches a given diff.
+    """
+    if len(commit.parents) == 0:
+        logger.debug("Skipping commit with no parents %(c)s", {"c": commit})
+        return False
+    elif len(commit.parents) >= 2:
+        logger.debug("Skipping merge commit %(c)s", {"c": commit})
+        return False
+    else:
+        parent = commit.parents[0]
+
+    return commit.diff(parent) == diff
+
+
 def contains_squash_commit(
     repo: git.Repo,
     a: git.refs.Head,
@@ -79,44 +134,12 @@ def contains_squash_commit(
     This works by finding the common ancestor / merge base M, and checking if the diff
     of (B, M) matches a commit in M..A.
     """
-    if a == b:
-        logger.debug("Not checking for squash commits, branches are identical")
-        return None
-
-    logger.info("Checking if '%(b)s' was squashed into '%(a)s'", {"a": a, "b": b})
-
-    try:
-        merge_base = find_merge_base(repo, a, b)
-    except NoMergeBase:
-        return False
-
-    branch_diff = b.commit.diff(merge_base)
-
-    if len(commits(repo, r1=merge_base, r2=b)) == 1:
-        logger.info(
-            "Skipping branch with one commit, "
-            "squashing and rebasing are equivalent in this case"
-        )
-        return None
-
-    for commit in commits(repo, r1=merge_base, r2=a):
-        if len(commit.parents) == 0:
-            logger.debug("Skipping commit with no parents %(c)s", {"c": commit})
-            continue
-        elif len(commit.parents) >= 2:
-            logger.debug("Skipping merge commit %(c)s", {"c": commit})
-            continue
-        else:
-            parent = commit.parents[0]
-
+    for commit, diff in potential_squash_commits(repo, a, b):
         logger.info(
             "Checking if '%(b)s' was squashed into '%(a)s' by %(c).7s",
             {"a": a, "b": b, "c": commit},
         )
-
-        matches_branch_diff = commit.diff(parent) == branch_diff
-
-        if matches_branch_diff:
+        if is_squash_commit(repo, commit, diff):
             return True
 
     return False

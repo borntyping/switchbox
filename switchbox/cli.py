@@ -129,9 +129,7 @@ def finish(app: Application, dry_run: bool, update_remotes: bool) -> None:
         app.update_remotes()
     app.update_default_branch()
     app.switch_default_branch()
-    app.remove_merged_branches(dry_run=dry_run)
-    app.remove_rebased_branches(dry_run=dry_run)
-    app.remove_squashed_branches(dry_run=dry_run)
+    app.remove_branches(dry_run=dry_run)
 
 
 @main.command()
@@ -188,9 +186,7 @@ def tidy(app: Application, dry_run: bool, update_remotes: bool) -> None:
     """
     if update_remotes:
         app.update_remotes()
-    app.remove_merged_branches(dry_run=dry_run)
-    app.remove_rebased_branches(dry_run=dry_run)
-    app.remove_squashed_branches(dry_run=dry_run)
+    app.remove_branches(dry_run=dry_run)
 
 
 @main.command()
