@@ -34,10 +34,6 @@ mypy = "^1.10.1"
 [tool.poetry.group.test.dependencies]
 pytest = "^8.2.2"
 
-[tool.poetry.group.publish.dependencies]
-setuptools = "^70.3.0"
-wheel = "^0.43.0"
-
 [tool.poetry.scripts]
 git-switchbox = "switchbox.cli:main"
 switchbox = "switchbox.cli:main"
