@@ -247,11 +247,7 @@ class Repo:
         self.gitpython.delete_head(branch, force=force)
 
     def rebase(self, upstream: str) -> None:
-        self.gitpython.git.rebase(
-            upstream,
-            # # https://github.blog/2022-10-03-highlights-from-git-2-38/
-            # update_refs=True,
-        )
+        self.gitpython.git.rebase(upstream, update_refs=True)
 
     def force_push(
         self, remote: str, local_branch: str, remote_branch: str, expect: str
