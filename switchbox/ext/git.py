@@ -76,7 +76,8 @@ def contains_squash_commit(
     """
     Checks if B has been merged into A with a squash commit.
 
-    This works by finding the common ancestor / merge base M, and checking if
+    This works by finding the common ancestor / merge base M, and checking if the diff
+    of (B, M) matches a commit in M..A.
     """
     if a == b:
         logger.debug("Not checking for squash commits, branches are identical")
