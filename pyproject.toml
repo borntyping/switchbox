@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "switchbox"
-version = "0.5.0"
+version = "0.6.0"
 readme = "README.md"
 description = "Tools for working with Git repositories."
 homepage = "https://pypi.org/project/switchbox/"
@@ -21,27 +21,29 @@ classifiers = [
 
 [tool.poetry.dependencies]
 python = "^3.10"
-rich = "^12.5.1"
-click = "^8.1.3"
+rich = "^13.7.1"
+click = "^8.1.7"
 giturl = "^0.1.3"
-inflect = "^6.0.0"
-PyGithub = "^1.55"
-GitPython = "^3.1.27"
+inflect = "^7.3.1"
+gitpython = "^3.1.43"
 
-[tool.poetry.dev-dependencies]
-black = "^22.6.0"
-mypy = "^0.971"
-pytest = "^7.1.2"
-pipx = "^1.1.0"
+[tool.poetry.group.lint.dependencies]
+black = "^24.4.2"
+mypy = "^1.10.1"
+
+[tool.poetry.group.test.dependencies]
+pytest = "^8.2.2"
+
+[tool.poetry.group.publish.dependencies]
+setuptools = "^70.3.0"
+wheel = "^0.43.0"
 
 [tool.poetry.scripts]
 git-switchbox = "switchbox.cli:main"
 switchbox = "switchbox.cli:main"
 
 [tool.mypy]
-files = [
-    "switchbox"
-]
+files = ["switchbox"]
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]

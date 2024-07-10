@@ -119,7 +119,7 @@ class Repo:
                 if reader.has_option(section, option):
                     value = reader.get_value(section, option)
 
-                    if isinstance(value, float):
+                    if isinstance(value, (int, float)):
                         raise RepositoryException(
                             "Unexpected value for {}.{}: {!r}".format(
                                 section, option, value
