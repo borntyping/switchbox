@@ -70,9 +70,7 @@ class Output:
             ),
             rich.progress.BarColumn(),
             rich.progress.TaskProgressColumn(),
-            rich.progress.MofNCompleteColumn(
-                table_column=rich.table.Column(width=9, justify="right")
-            ),
+            rich.progress.MofNCompleteColumn(table_column=rich.table.Column(width=9, justify="right")),
             rich.progress.TimeRemainingColumn(),
             rich.progress.TextColumn("{task.fields[item]}"),
         )
@@ -146,18 +144,12 @@ class Application:
     def update_default_branch(self) -> None:
         output = Output(**self.context)
 
-        with output.status(
-            "Updating branch {default_branch} "
-            "to match {default_remote}/{default_branch}."
-        ):
+        with output.status("Updating branch {default_branch} " "to match {default_remote}/{default_branch}."):
             self.repo.update_branch_from_remote(
                 remote=self.repo.default_remote,
                 branch=self.repo.default_branch,
             )
-        output.done(
-            "Updated branch {default_branch} "
-            "to match {default_branch}/{default_remote}."
-        )
+        output.done("Updated branch {default_branch} " "to match {default_branch}/{default_remote}.")
 
     def switch_default_branch(self) -> None:
         output = Output(**self.context)
@@ -172,16 +164,10 @@ class Application:
 
     def remove_branches(self, dry_run: bool = True) -> None:
         upstream = self.repo.default_branch
-        strategies: typing.Sequence[
-            tuple[str, BranchesStrategy, list[BranchesItem]]
-        ] = [
+        strategies: typing.Sequence[tuple[str, BranchesStrategy, list[BranchesItem]]] = [
             ("[green]merged[/]", self.repo.discover_merged_branches(upstream), []),
             ("[yellow]rebased[/]", self.repo.discover_rebased_branches(upstream), []),
-            (
-                "[magenta]squashed[/]",
-                self.repo.discover_squashed_branches(upstream),
-                [],
-            ),
+            ("[magenta]squashed[/]", self.repo.discover_squashed_branches(upstream), []),
         ]
 
         with Output.progress() as progress:
@@ -190,11 +176,7 @@ class Application:
                 items = [item for item in strategy.generate()]
 
                 progress.update(task, completed=0, total=len(items))
-                items[:] = [
-                    item
-                    for item in advance(items, progress, task)
-                    if strategy.filter(item)
-                ]
+                items[:] = [item for item in advance(items, progress, task) if strategy.filter(item)]
                 progress.update(task, item="")
 
         for merged, strategy, items in strategies:
@@ -208,26 +190,19 @@ class Application:
             )
 
             if not items:
-                output.done(
-                    "There are no branches that have been {merged} into {target}."
-                )
+                output.done("There are no branches that have been {merged} into {target}.")
                 continue
 
             if dry_run:
                 output.dry_run(
-                    "Found {one} {branch} "
-                    "that {was} {merged} into {target} "
-                    "and can be removed: {items}."
+                    "Found {one} {branch} " "that {was} {merged} into {target} " "and can be removed: {items}."
                 )
                 continue
 
             with output.status("Removing {merged} {branch}..."):
                 strategy.delete(items)
 
-            output.done(
-                "Found and removed {one} {branch} "
-                "that {was} {merged} into {target}: {items}."
-            )
+            output.done("Found and removed {one} {branch} " "that {was} {merged} into {target}: {items}.")
 
     def rebase_active_branch(self) -> typing.Tuple[str, str]:
         """Rebase the active branch on top of the remote default branch."""
@@ -242,20 +217,14 @@ class Application:
     def rebase_and_push_active_branch(self):
         before, after = self.rebase_active_branch()
         output = Output(**self.context)
-        with output.status(
-            "Force pushing from {default_branch} "
-            "to {default_branch}/{default_remote}..."
-        ):
+        with output.status("Force pushing from {default_branch} " "to {default_branch}/{default_remote}..."):
             self.repo.force_push(
                 remote=self.repo.default_remote,
                 local_branch=self.repo.active_branch,
                 remote_branch=self.repo.active_branch,
                 expect=before,
             )
-        output.done(
-            "Force pushed from {default_branch} "
-            "to {default_branch}/{default_remote}."
-        )
+        output.done("Force pushed from {default_branch} " "to {default_branch}/{default_remote}.")
 
     def configure_sparse_checkout(self) -> None:
         output = Output()

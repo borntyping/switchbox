@@ -89,9 +89,7 @@ class Repo:
 
     def detect_default_branch(self) -> str:
         if not self.gitpython.heads:
-            raise RepositoryException(
-                "Repository has no branches. Is this a new repository?"
-            )
+            raise RepositoryException("Repository has no branches. Is this a new repository?")
 
         if head := self._first_match(
             items=self.gitpython.heads,
@@ -104,9 +102,7 @@ class Repo:
 
     def detect_default_remote(self) -> str:
         if not self.gitpython.heads:
-            raise RepositoryException(
-                "Repository has no remotes. Is this a new repository?"
-            )
+            raise RepositoryException("Repository has no remotes. Is this a new repository?")
 
         if remote := self._first_match(
             items=self.gitpython.remotes,
@@ -124,11 +120,7 @@ class Repo:
                     value = reader.get_value(section, option)
 
                     if isinstance(value, (int, float)):
-                        raise RepositoryException(
-                            "Unexpected value for {}.{}: {!r}".format(
-                                section, option, value
-                            )
-                        )
+                        raise RepositoryException("Unexpected value for {}.{}: {!r}".format(section, option, value))
 
                     return value
         return None
@@ -207,9 +199,7 @@ class Repo:
     def rebase(self, upstream: str) -> None:
         self.gitpython.git.rebase(upstream, update_refs=True)
 
-    def force_push(
-        self, remote: str, local_branch: str, remote_branch: str, expect: str
-    ) -> None:
+    def force_push(self, remote: str, local_branch: str, remote_branch: str, expect: str) -> None:
         self.gitpython.git.push(
             remote,
             f"{local_branch}:{remote_branch}",
@@ -223,8 +213,7 @@ class Repo:
         include = ["/*"]
         exclude = [f"!{path}" for path in self.config.sparse_checkout_exclude]
         logger.info(
-            "Setting sparse-checkout paths "
-            "to include %(include)r and exclude %(exclude)r",
+            "Setting sparse-checkout paths " "to include %(include)r and exclude %(exclude)r",
             {"include": include, "exclude": exclude},
         )
         self.gitpython.git._call_process(

@@ -37,14 +37,10 @@ def find_merge_base(
     merge_bases = repo.merge_base(a, b)
 
     if len(merge_bases) == 0:
-        raise NoMergeBase(
-            "No merge base found for %(a).7s and %(b).7s" % {"a": a, "b": b}
-        )
+        raise NoMergeBase("No merge base found for %(a).7s and %(b).7s" % {"a": a, "b": b})
 
     if len(merge_bases) >= 2:
-        raise MultipleMergeBases(
-            "Multiple merge bases found for %(a).7s and %(b).7s" % {"a": a, "b": b}
-        )
+        raise MultipleMergeBases("Multiple merge bases found for %(a).7s and %(b).7s" % {"a": a, "b": b})
 
     merge_base = merge_bases[0]
 
@@ -98,10 +94,7 @@ def potential_squash_commits(
     diff = b.commit.diff(merge_base)
 
     if len(commits(repo, r1=merge_base, r2=b)) == 1:
-        logger.info(
-            "Skipping branch with one commit, "
-            "squashing and rebasing are equivalent in this case"
-        )
+        logger.info("Skipping branch with one commit, " "squashing and rebasing are equivalent in this case")
         return []
 
     return [(commit, diff) for commit in commits(repo, r1=merge_base, r2=a)]

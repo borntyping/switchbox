@@ -80,10 +80,7 @@ class MergedBranchesStrategy(BranchesStrategy[bool]):
     def generate(self) -> typing.Iterable[BranchesItem[bool]]:
         merged_heads = merged(self.gitpython, self.upstream)
 
-        return [
-            BranchesItem(head, head.commit, head in merged_heads)
-            for head in self.heads()
-        ]
+        return [BranchesItem(head, head.commit, head in merged_heads) for head in self.heads()]
 
     def filter(self, item: BranchesItem) -> bool:
         return item.context
@@ -105,9 +102,7 @@ class RebasedBranchesStrategy(BranchesStrategy[None]):
         return [BranchesItem(head, head.commit, None) for head in self.heads()]
 
     def filter(self, item: BranchesItem) -> bool:
-        return contains_equivalent(
-            self.gitpython, upstream=self.upstream, head=item.head
-        )
+        return contains_equivalent(self.gitpython, upstream=self.upstream, head=item.head)
 
 
 class SquashedBranchesStrategy(BranchesStrategy[git.DiffIndex]):
@@ -121,9 +116,7 @@ class SquashedBranchesStrategy(BranchesStrategy[git.DiffIndex]):
         return [
             BranchesItem(head, commit, diff)
             for head in self.heads()
-            for commit, diff in potential_squash_commits(
-                self.gitpython, a=self.upstream, b=head
-            )
+            for commit, diff in potential_squash_commits(self.gitpython, a=self.upstream, b=head)
         ]
 
     def filter(self, item: BranchesItem) -> bool:
