@@ -368,6 +368,7 @@ class Repo:
         upstream: git.Head,
         plans: typing.Iterable[MaybeDeleteSquashedBranchPlan],
     ) -> None:
+        # TODO: Store a hash of the diffindex; since if the branch changes our comparison is now invalid
         with self.gitpython.config_writer("repository") as writer:
             for plan in plans:
                 section = f'{SECTION} "{plan.head.name}"'
