@@ -18,6 +18,10 @@ class MultipleMergeBases(GitException):
     pass
 
 
+class IdenticalBranches(GitException):
+    pass
+
+
 def list_merged_heads(repo: git.Repo, into: git.Head) -> typing.Sequence[git.Head]:
     rc, stdout, stderr = repo.git.branch(
         "--list",
@@ -79,25 +83,21 @@ def potential_squash_commits(
     repo: git.Repo,
     a: git.refs.Head,
     b: git.refs.Head,
-) -> typing.Sequence[tuple[git.Commit, git.DiffIndex]]:
+) -> tuple[git.DiffIndex, typing.Sequence[git.Commit]]:
     if a == b:
-        logger.debug("Not checking for squash commits, branches are identical")
-        return []
+        raise IdenticalBranches("Not checking for squash commits, branches are identical")
 
     logger.info("Checking if '%(b)s' was squashed into '%(a)s'", {"a": a, "b": b})
 
-    try:
-        merge_base = find_merge_base(repo, a, b)
-    except NoMergeBase:
-        return []
+    merge_base = find_merge_base(repo, a, b)
 
     diff = b.commit.diff(merge_base)
 
     if len(commits(repo, r1=merge_base, r2=b)) == 1:
-        logger.info("Skipping branch with one commit, " "squashing and rebasing are equivalent in this case")
-        return []
+        logger.info("Skipping branch with one commit, as squashing and rebasing are equivalent in this case")
+        return diff, []
 
-    return [(commit, diff) for commit in commits(repo, r1=merge_base, r2=a)]
+    return diff, list(reversed(commits(repo, r1=merge_base, r2=a)))
 
 
 def is_squash_commit(repo: git.Repo, commit: git.Commit, diff: git.DiffIndex):

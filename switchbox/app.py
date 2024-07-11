@@ -1,8 +1,8 @@
 import collections
 import dataclasses
+import logging
 import typing
 
-import git
 import inflect
 import rich
 import rich.console
@@ -14,6 +14,7 @@ import rich.theme
 from switchbox.repo import MaybeDeleteBranchPlan, Repo
 
 T = typing.TypeVar("T")
+P = typing.TypeVar("P", bound=MaybeDeleteBranchPlan)
 
 OutputContextValue = typing.Union[typing.Callable[[], typing.Any], typing.Any]
 
@@ -27,6 +28,8 @@ console = rich.console.Console(
 )
 
 p = inflect.engine()
+
+logger = logging.getLogger(__name__)
 
 
 def plural(text: str, items: typing.Sized) -> str:
@@ -79,6 +82,13 @@ class Output:
     @classmethod
     def format_remote(cls, remote: str | None) -> str:
         return f"[remote]{remote}[/]" if remote else "[red]UNSET[/]"
+
+
+@dataclasses.dataclass()
+class RemoveBranches(typing.Generic[P]):
+    description: str
+    plans: typing.Sequence[P]
+    force: bool = dataclasses.field(default=False)
 
 
 @dataclasses.dataclass()
@@ -144,12 +154,26 @@ class Application:
         output.done("Switched to the {default_branch} branch.")
 
     def remove_branches(self, dry_run: bool = True) -> None:
-        target = self.repo.gitpython.heads[self.repo.default_branch]
-
-        strategies: typing.Sequence[tuple[str, typing.Sequence[MaybeDeleteBranchPlan], list[git.Head], bool]] = [
-            ("[green]merged[/]", self.repo.plan_delete_merged_branches(self.repo.gitpython, target), [], False),
-            ("[yellow]rebased[/]", self.repo.plan_delete_rebased_branches(self.repo.gitpython, target), [], True),
-            ("[magenta]squashed[/]", self.repo.plan_delete_squashed_branches(self.repo.gitpython, target), [], True),
+        upstream = self.repo.gitpython.heads[self.repo.default_branch]
+        remove_upstream_branches = RemoveBranches(
+            plans=self.repo.plan_delete_merged_branches(upstream),
+            force=False,
+            description="[green]merged[/]",
+        )
+        remove_rebased_branches = RemoveBranches(
+            plans=self.repo.plan_delete_rebased_branches(upstream),
+            force=True,
+            description="[yellow]rebased[/]",
+        )
+        remove_squashed_branches = RemoveBranches(
+            plans=self.repo.plan_delete_squashed_branches(upstream),
+            force=True,
+            description="[magenta]squashed[/]",
+        )
+        remove_branches: typing.Sequence[RemoveBranches] = [
+            remove_upstream_branches,
+            remove_rebased_branches,
+            remove_squashed_branches,
         ]
 
         with rich.progress.Progress(
@@ -168,42 +192,46 @@ class Application:
             rich.progress.TextColumn("{task.fields[plan]}"),
             rich.progress.TextColumn("{task.fields[step]}"),
         ) as progress:
-            for merged, plans, delete, _ in strategies:
-                total = sum(len(plan) for plan in plans)
-                task = progress.add_task(f"Finding {merged} commits...", total=total, plan="", step="")
+            for rb in remove_branches:
+                total = sum(len(plan) for plan in rb.plans)
+                task = progress.add_task(f"Finding {rb.description} commits...", total=total, plan="", step="")
 
-                # Completed holds the total of all completed *plans*, since we can skip
-                # steps in a plan.
+                # Completed holds the total of all completed *plans*, since we can skip steps in a plan.
                 completed = 0
-                for plan in plans:
+                for plan in rb.plans:
                     progress.update(task, completed=completed, plan=plan)
                     # If *any* step returns true, we can skip the remaining steps in the plan.
-                    for i, step in enumerate(plan, start=1):
-                        progress.update(task, completed=completed + i, step=step)
-                        if step.delete():
-                            delete.append(plan.head)
+                    for step in plan:
+                        progress.update(task, completed=completed + step.index, step=step)
+                        # Executing a step should set plan.merged if the step found the branch was merged.
+                        if plan.merged:
                             break
                     completed += len(plan)
-                    progress.update(task, completed=completed, plan="", step="")
+                progress.update(task, completed=completed, plan="", step="")
 
-        for merged, _, delete, force in strategies:
+        for rb in remove_branches:
+            branches = [plan.head for plan in rb.plans if plan.merged]
+
             output = Output(
-                merged=merged,
-                one=len(delete),
-                branch=p.plural("branch", len(delete)),
-                was=p.plural_verb("was", len(delete)),
+                merged=rb.description,
+                one=len(branches),
+                branch=p.plural("branch", len(branches)),
+                was=p.plural_verb("was", len(branches)),
                 target=Output.format_branch(self.repo.default_branch),
-                items=Output.format_branches([head.name for head in delete]),
+                items=Output.format_branches([head.name for head in branches]),
             )
 
-            if not delete:
+            if not branches:
                 output.done("There are no branches that have been {merged} into {target}.")
             elif dry_run:
                 output.dry_run("Found {one} {branch} that {was} {merged} into {target} and can be removed: {items}.")
             else:
                 with output.status("Removing {merged} {branch}..."):
-                    self.repo.delete_branches(delete, force=force)
+                    self.repo.delete_branches(branches, force=rb.force)
                 output.done("Found and removed {one} {branch} " "that {was} {merged} into {target}: {items}.")
+
+        with Output(merged=remove_squashed_branches.description).status("Recording {merged} comparisons..."):
+            self.repo.done_delete_squashed_branches(upstream, remove_squashed_branches.plans)
 
     def rebase_active_branch(self) -> typing.Tuple[str, str]:
         """Rebase the active branch on top of the remote default branch."""

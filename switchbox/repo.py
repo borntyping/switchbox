@@ -29,36 +29,88 @@ SECTION = "switchbox"
 
 
 @dataclasses.dataclass()
-class MaybeDeleteStep:
-    """
-    A unit of work that checks if a branch has been merged and can be deleted.
-    """
-
+class MaybeDeleteBranchStep:
+    index: int
     commit: git.Commit
-    delete: typing.Callable[[], bool]
+    merged: bool
 
-    def __str__(self):
+    def __str__(self) -> str:
         return self.commit.hexsha[:7]
 
 
-@dataclasses.dataclass()
-class MaybeDeleteBranchPlan(typing.Sized, typing.Iterable[MaybeDeleteStep]):
-    """
-    A list of steps that check if a branch has been merged and can be deleted.
-    If *any* step returns True, this branch can be deleted.
-    """
-
+class MaybeDeleteBranchPlan(typing.Sized, typing.Iterable[MaybeDeleteBranchStep]):
     head: git.Head
-    steps: list[MaybeDeleteStep]
+    merged: bool
 
     def __str__(self) -> str:
         return self.head.name
 
     def __len__(self) -> int:
-        return len(self.steps)
+        raise NotImplementedError
 
-    def __iter__(self) -> typing.Iterator[MaybeDeleteStep]:
-        return iter(self.steps)
+    def __iter__(self) -> typing.Iterator[MaybeDeleteBranchStep]:
+        raise NotImplementedError
+
+
+@dataclasses.dataclass()
+class MaybeDeleteMergedBranchPlan(MaybeDeleteBranchPlan):
+    head: git.Head
+    merged_heads: set[git.Head]
+
+    merged: bool = dataclasses.field(default=False, init=False)
+
+    def __len__(self) -> int:
+        return 1
+
+    def __iter__(self) -> typing.Iterator[MaybeDeleteBranchStep]:
+        self.merged = self.head in self.merged_heads
+        yield MaybeDeleteBranchStep(index=1, commit=self.head.commit, merged=self.merged)
+
+
+@dataclasses.dataclass()
+class MaybeDeleteRebasedBranchPlan(MaybeDeleteBranchPlan):
+    repo: git.Repo
+    head: git.Head = dataclasses.field(kw_only=True)
+    upstream: git.Head = dataclasses.field(kw_only=True)
+
+    merged: bool = dataclasses.field(default=False, init=False)
+
+    def __len__(self) -> int:
+        return 1
+
+    def __iter__(self) -> typing.Iterator[MaybeDeleteBranchStep]:
+        self.merged = contains_equivalent(repo=self.repo, upstream=self.upstream, head=self.head)
+        yield MaybeDeleteBranchStep(index=1, commit=self.head.commit, merged=self.merged)
+
+
+@dataclasses.dataclass()
+class MaybeDeleteSquashedBranchPlan(MaybeDeleteBranchPlan):
+    """
+    A list of steps that check if a branch has been merged and can be deleted.
+    If *any* step returns True, this branch can be deleted.
+    """
+
+    repo: git.Repo
+    head: git.Head
+
+    diff: git.DiffIndex
+    commits: typing.Sequence[git.Commit]
+
+    checked: git.Commit | None = dataclasses.field(default=None)
+    merged: bool = dataclasses.field(default=False, init=False)
+
+    def __len__(self) -> int:
+        return len(self.commits)
+
+    def __iter__(self) -> typing.Iterator[MaybeDeleteBranchStep]:
+        # Before this point in the list, we can assume we've already checked the commit.
+        split = self.commits.index(self.checked) if self.checked is not None else len(self.commits)
+
+        for index, commit in enumerate(self.commits):
+            merged = is_squash_commit(self.repo, commit, self.diff) if index >= split else False
+            self.checked = commit
+            self.merged = self.merged or merged
+            yield MaybeDeleteBranchStep(index=index, commit=commit, merged=merged)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -272,40 +324,54 @@ class Repo:
             )
             self.gitpython.delete_head(head, force=force)
 
-    def plan_delete_merged_branches(self, gitpython: git.Repo, target: git.Head) -> list[MaybeDeleteBranchPlan]:
-        merged = list_merged_heads(gitpython, target)
+    def plan_delete_merged_branches(self, upstream: git.Head) -> list[MaybeDeleteMergedBranchPlan]:
+        merged = set(list_merged_heads(self.gitpython, upstream))
+        return [MaybeDeleteMergedBranchPlan(head, merged) for head in self.gitpython.heads if head != upstream]
+
+    def plan_delete_rebased_branches(self, upstream: git.Head) -> list[MaybeDeleteBranchPlan]:
         return [
-            MaybeDeleteBranchPlan(
-                head=head,
-                steps=[
-                    MaybeDeleteStep(head.commit, lambda: head in merged),
-                ],
-            )
-            for head in gitpython.heads
-            if head != target
+            MaybeDeleteRebasedBranchPlan(self.gitpython, head=head, upstream=upstream)
+            for head in self.gitpython.heads
+            if head != upstream
         ]
 
-    def plan_delete_rebased_branches(self, gitpython: git.Repo, target: git.Head) -> list[MaybeDeleteBranchPlan]:
-        return [
-            MaybeDeleteBranchPlan(
-                head=head,
-                steps=[
-                    MaybeDeleteStep(head.commit, lambda: contains_equivalent(gitpython, target, head)),
-                ],
-            )
-            for head in gitpython.heads
-            if head != target
-        ]
+    def plan_delete_squashed_branches(self, upstream: git.Head) -> list[MaybeDeleteSquashedBranchPlan]:
+        heads = [head for head in self.gitpython.heads if head != upstream]
+        with self.gitpython.config_reader("repository") as reader:
+            return [self._plan_delete_squashed_branches(upstream=upstream, head=head, reader=reader) for head in heads]
 
-    def plan_delete_squashed_branches(self, gitpython: git.Repo, target: git.Head) -> list[MaybeDeleteBranchPlan]:
-        return [
-            MaybeDeleteBranchPlan(
-                head=head,
-                steps=[
-                    MaybeDeleteStep(commit, lambda: is_squash_commit(gitpython, commit, diff))
-                    for (commit, diff) in potential_squash_commits(gitpython, a=target, b=head)
-                ],
-            )
-            for head in gitpython.heads
-            if head != target
-        ]
+    def _plan_delete_squashed_branches(
+        self,
+        upstream: git.Head,
+        head: git.Head,
+        reader: git.GitConfigParser,
+    ) -> MaybeDeleteSquashedBranchPlan:
+        section = f'{SECTION} "{head.name}"'
+
+        checked = None
+        if reader.has_section(section):
+            if value := reader.get(section, "squashed", fallback=None):
+                checked = self.gitpython.commit(value)
+
+        diff, commits = potential_squash_commits(self.gitpython, a=upstream, b=head)
+
+        return MaybeDeleteSquashedBranchPlan(
+            repo=self.gitpython,
+            head=head,
+            diff=diff,
+            commits=commits,
+            checked=checked,
+        )
+
+    def done_delete_squashed_branches(
+        self,
+        upstream: git.Head,
+        plans: typing.Iterable[MaybeDeleteSquashedBranchPlan],
+    ) -> None:
+        with self.gitpython.config_writer("repository") as writer:
+            for plan in plans:
+                section = f'{SECTION} "{plan.head.name}"'
+                if not writer.has_section(section):
+                    writer.add_section(section)
+                if plan.checked is not None:
+                    writer.set(section, "squashed", plan.checked.hexsha)
