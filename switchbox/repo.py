@@ -1,3 +1,10 @@
+"""
+Strategies for finding and removing branches that have been merged into a mainline branch.
+
+This is a little messy, since finding squashed commits multiple units of work for each
+branch we compare, which is why the algorithm is broken up so much.
+"""
+
 import dataclasses
 import logging
 import pathlib
@@ -6,12 +13,52 @@ import typing
 import click
 import git
 
+from switchbox.ext.git import (
+    contains_equivalent,
+    is_squash_commit,
+    list_merged_heads,
+    potential_squash_commits,
+)
+
 logger = logging.getLogger(__name__)
 
 F = typing.TypeVar("F", bound=typing.Callable)
 Named = typing.TypeVar("Named", git.Head, git.Remote)
 
 SECTION = "switchbox"
+
+
+@dataclasses.dataclass()
+class MaybeDeleteStep:
+    """
+    A unit of work that checks if a branch has been merged and can be deleted.
+    """
+
+    commit: git.Commit
+    delete: typing.Callable[[], bool]
+
+    def __str__(self):
+        return self.commit.hexsha[:7]
+
+
+@dataclasses.dataclass()
+class MaybeDeleteBranchPlan(typing.Sized, typing.Iterable[MaybeDeleteStep]):
+    """
+    A list of steps that check if a branch has been merged and can be deleted.
+    If *any* step returns True, this branch can be deleted.
+    """
+
+    head: git.Head
+    steps: list[MaybeDeleteStep]
+
+    def __str__(self) -> str:
+        return self.head.name
+
+    def __len__(self) -> int:
+        return len(self.steps)
+
+    def __iter__(self) -> typing.Iterator[MaybeDeleteStep]:
+        return iter(self.steps)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -224,3 +271,41 @@ class Repo:
                 {"head": head.name, "force": force},
             )
             self.gitpython.delete_head(head, force=force)
+
+    def plan_delete_merged_branches(self, gitpython: git.Repo, target: git.Head) -> list[MaybeDeleteBranchPlan]:
+        merged = list_merged_heads(gitpython, target)
+        return [
+            MaybeDeleteBranchPlan(
+                head=head,
+                steps=[
+                    MaybeDeleteStep(head.commit, lambda: head in merged),
+                ],
+            )
+            for head in gitpython.heads
+            if head != target
+        ]
+
+    def plan_delete_rebased_branches(self, gitpython: git.Repo, target: git.Head) -> list[MaybeDeleteBranchPlan]:
+        return [
+            MaybeDeleteBranchPlan(
+                head=head,
+                steps=[
+                    MaybeDeleteStep(head.commit, lambda: contains_equivalent(gitpython, target, head)),
+                ],
+            )
+            for head in gitpython.heads
+            if head != target
+        ]
+
+    def plan_delete_squashed_branches(self, gitpython: git.Repo, target: git.Head) -> list[MaybeDeleteBranchPlan]:
+        return [
+            MaybeDeleteBranchPlan(
+                head=head,
+                steps=[
+                    MaybeDeleteStep(commit, lambda: is_squash_commit(gitpython, commit, diff))
+                    for (commit, diff) in potential_squash_commits(gitpython, a=target, b=head)
+                ],
+            )
+            for head in gitpython.heads
+            if head != target
+        ]

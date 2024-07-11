@@ -11,8 +11,11 @@ import rich.status
 import rich.table
 import rich.theme
 
-from switchbox.plan import MaybeDeletePlan
-from switchbox.repo import Repo
+from switchbox.repo import MaybeDeleteBranchPlan, Repo
+
+T = typing.TypeVar("T")
+
+OutputContextValue = typing.Union[typing.Callable[[], typing.Any], typing.Any]
 
 console = rich.console.Console(
     theme=rich.theme.Theme(
@@ -23,7 +26,7 @@ console = rich.console.Console(
     )
 )
 
-OutputContextValue = typing.Union[typing.Callable[[], typing.Any], typing.Any]
+p = inflect.engine()
 
 
 def plural(text: str, items: typing.Sized) -> str:
@@ -32,11 +35,6 @@ def plural(text: str, items: typing.Sized) -> str:
 
 def join(items: typing.Collection) -> str:
     return p.join(list(sorted(str(item) for item in items)))
-
-
-p = inflect.engine()
-
-T = typing.TypeVar("T")
 
 
 class OutputContext(collections.UserDict[str, OutputContextValue]):
@@ -57,24 +55,6 @@ class Output:
 
     def status(self, text: str) -> rich.status.Status:
         return rich.status.Status(self.format(text), speed=2.0)
-
-    @staticmethod
-    def progress() -> rich.progress.Progress:
-        return rich.progress.Progress(
-            rich.progress.SpinnerColumn(
-                style="bar.complete",
-                finished_text="[bar.finished]➔[/]",
-            ),
-            rich.progress.TextColumn(
-                text_format="[progress.description]{task.description}",
-                table_column=rich.table.Column(width=30),
-            ),
-            rich.progress.BarColumn(),
-            rich.progress.TaskProgressColumn(),
-            rich.progress.MofNCompleteColumn(table_column=rich.table.Column(width=9, justify="right")),
-            rich.progress.TimeRemainingColumn(),
-            rich.progress.TextColumn("{task.fields[item]}"),
-        )
 
     def done(self, task: str) -> None:
         console.print("[green]✓[/]", self.format(task), highlight=False)
@@ -166,27 +146,45 @@ class Application:
     def remove_branches(self, dry_run: bool = True) -> None:
         target = self.repo.gitpython.heads[self.repo.default_branch]
 
-        strategies: typing.Sequence[tuple[str, list[MaybeDeletePlan], list[git.Head], bool]] = [
-            ("[green]merged[/]", MaybeDeletePlan.merged(self.repo.gitpython, target), [], False),
-            ("[yellow]rebased[/]", MaybeDeletePlan.rebased(self.repo.gitpython, target), [], True),
-            ("[magenta]squashed[/]", MaybeDeletePlan.squashed(self.repo.gitpython, target), [], True),
+        strategies: typing.Sequence[tuple[str, typing.Sequence[MaybeDeleteBranchPlan], list[git.Head], bool]] = [
+            ("[green]merged[/]", self.repo.plan_delete_merged_branches(self.repo.gitpython, target), [], False),
+            ("[yellow]rebased[/]", self.repo.plan_delete_rebased_branches(self.repo.gitpython, target), [], True),
+            ("[magenta]squashed[/]", self.repo.plan_delete_squashed_branches(self.repo.gitpython, target), [], True),
         ]
 
-        with Output.progress() as progress:
+        with rich.progress.Progress(
+            rich.progress.SpinnerColumn(
+                style="bar.complete",
+                finished_text="[bar.finished]➔[/]",
+            ),
+            rich.progress.TextColumn(
+                text_format="[progress.description]{task.description}",
+                table_column=rich.table.Column(width=30),
+            ),
+            rich.progress.BarColumn(),
+            rich.progress.TaskProgressColumn(),
+            rich.progress.MofNCompleteColumn(table_column=rich.table.Column(width=9, justify="right")),
+            rich.progress.TimeRemainingColumn(),
+            rich.progress.TextColumn("{task.fields[plan]}"),
+            rich.progress.TextColumn("{task.fields[step]}"),
+        ) as progress:
             for merged, plans, delete, _ in strategies:
-                task = progress.add_task(f"Finding {merged} commits...", item="")
+                total = sum(len(plan) for plan in plans)
+                task = progress.add_task(f"Finding {merged} commits...", total=total, plan="", step="")
 
-                progress.update(task, total=sum(plan.count() for plan in plans))
-
+                # Completed holds the total of all completed *plans*, since we can skip
+                # steps in a plan.
                 completed = 0
                 for plan in plans:
-                    for i, step in enumerate(plan.steps, start=1):
-                        progress.update(task, completed=completed + i, item=str(step))
+                    progress.update(task, completed=completed, plan=plan)
+                    # If *any* step returns true, we can skip the remaining steps in the plan.
+                    for i, step in enumerate(plan, start=1):
+                        progress.update(task, completed=completed + i, step=step)
                         if step.delete():
-                            delete.append(step.branch)
+                            delete.append(plan.head)
                             break
-                    completed += plan.count()
-                    progress.update(task, completed=completed, item="")
+                    completed += len(plan)
+                    progress.update(task, completed=completed, plan="", step="")
 
         for merged, _, delete, force in strategies:
             output = Output(
