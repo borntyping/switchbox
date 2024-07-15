@@ -154,7 +154,7 @@ class Application:
         output.done("Switched to the {default_branch} branch.")
 
     def remove_branches(self, dry_run: bool = True) -> None:
-        upstream = self.repo.gitpython.heads[self.repo.default_branch]
+        upstream = self.repo.gitpython.references[self.repo.remote_default_branch]
         remove_upstream_branches = RemoveBranches(
             plans=self.repo.plan_delete_merged_branches(upstream),
             force=False,

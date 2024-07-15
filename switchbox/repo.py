@@ -71,7 +71,7 @@ class MaybeDeleteMergedBranchPlan(MaybeDeleteBranchPlan):
 class MaybeDeleteRebasedBranchPlan(MaybeDeleteBranchPlan):
     repo: git.Repo
     head: git.Head = dataclasses.field(kw_only=True)
-    upstream: git.Head = dataclasses.field(kw_only=True)
+    upstream: git.Reference = dataclasses.field(kw_only=True)
 
     merged: bool = dataclasses.field(default=False, init=False)
 
@@ -315,34 +315,32 @@ class Repo:
 
     def delete_branches(self, heads: typing.Sequence[git.Head], force: bool = False) -> None:
         for head in heads:
+            logger.info("Deleting head %(head)s", {"head": head.name, "force": force})
+
             if self.gitpython.active_branch == head:
                 raise Exception("Refusing to remove the active branch")
 
-            logger.info(
-                "Deleting head %(branch)s",
-                {"head": head.name, "force": force},
-            )
             self.gitpython.delete_head(head, force=force)
 
-    def plan_delete_merged_branches(self, upstream: git.Head) -> list[MaybeDeleteMergedBranchPlan]:
+    def _heads(self):
+        return (
+            head for head in self.gitpython.heads if head.name not in {self.remote_default_branch, self.default_branch}
+        )
+
+    def plan_delete_merged_branches(self, upstream: git.Reference) -> list[MaybeDeleteMergedBranchPlan]:
         merged = set(list_merged_heads(self.gitpython, upstream))
-        return [MaybeDeleteMergedBranchPlan(head, merged) for head in self.gitpython.heads if head != upstream]
+        return [MaybeDeleteMergedBranchPlan(head, merged) for head in self._heads()]
 
-    def plan_delete_rebased_branches(self, upstream: git.Head) -> list[MaybeDeleteBranchPlan]:
-        return [
-            MaybeDeleteRebasedBranchPlan(self.gitpython, head=head, upstream=upstream)
-            for head in self.gitpython.heads
-            if head != upstream
-        ]
+    def plan_delete_rebased_branches(self, upstream: git.Reference) -> list[MaybeDeleteBranchPlan]:
+        return [MaybeDeleteRebasedBranchPlan(self.gitpython, head=head, upstream=upstream) for head in self._heads()]
 
-    def plan_delete_squashed_branches(self, upstream: git.Head) -> list[MaybeDeleteSquashedBranchPlan]:
-        heads = [head for head in self.gitpython.heads if head != upstream]
+    def plan_delete_squashed_branches(self, upstream: git.Reference) -> list[MaybeDeleteSquashedBranchPlan]:
         with self.gitpython.config_reader("repository") as reader:
-            return [self._plan_delete_squashed_branches(upstream=upstream, head=head, reader=reader) for head in heads]
+            return [self._plan_delete_squashed_branches(upstream, head, reader) for head in self._heads()]
 
     def _plan_delete_squashed_branches(
         self,
-        upstream: git.Head,
+        upstream: git.Reference,
         head: git.Head,
         reader: git.GitConfigParser,
     ) -> MaybeDeleteSquashedBranchPlan:
@@ -350,6 +348,9 @@ class Repo:
 
         checked = None
         if reader.has_section(section):
+            if upstream.name != reader.get(section, "upstream", fallback=upstream.name):
+                raise Exception("Upstream changed")
+
             if value := reader.get(section, "squashed", fallback=None):
                 checked = self.gitpython.commit(value)
 
@@ -365,7 +366,7 @@ class Repo:
 
     def done_delete_squashed_branches(
         self,
-        upstream: git.Head,
+        upstream: git.Reference,
         plans: typing.Iterable[MaybeDeleteSquashedBranchPlan],
     ) -> None:
         # TODO: Store a hash of the diffindex; since if the branch changes our comparison is now invalid
@@ -375,4 +376,5 @@ class Repo:
                 if not writer.has_section(section):
                     writer.add_section(section)
                 if plan.checked is not None:
+                    writer.set(section, "upstream", upstream.name)
                     writer.set(section, "squashed", plan.checked.hexsha)

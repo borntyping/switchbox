@@ -22,7 +22,7 @@ class IdenticalBranches(GitException):
     pass
 
 
-def list_merged_heads(repo: git.Repo, into: git.Head) -> typing.Sequence[git.Head]:
+def list_merged_heads(repo: git.Repo, into: git.Reference) -> typing.Sequence[git.Head]:
     rc, stdout, stderr = repo.git.branch(
         "--list",
         "--format=%(refname:short)",
