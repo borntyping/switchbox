@@ -106,11 +106,19 @@ class MaybeDeleteSquashedBranchPlan(MaybeDeleteBranchPlan):
         """
         The split should be the point in the list of commits where all the earlier
         commits have already been checked in a previous invocation of the CLI.
+
+        The commit referenced by 'self.checked' might not be in 'self.commits' if the
+        branch has been rebased since switchbox last ran.
         """
         if not self.commits:
             return
 
-        split = self.commits.index(self.checked) if self.checked is not None else len(self.commits)
+        if self.checked is None:
+            split = 0
+        elif self.checked not in self.commits:
+            split = 0
+        else:
+            split = self.commits.index(self.checked)
 
         for index, commit in enumerate(self.commits):
             merged = is_squash_commit(self.repo, commit, self.diff) if index >= split else False
