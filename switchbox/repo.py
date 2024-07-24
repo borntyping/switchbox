@@ -103,7 +103,13 @@ class MaybeDeleteSquashedBranchPlan(MaybeDeleteBranchPlan):
         return len(self.commits)
 
     def __iter__(self) -> typing.Iterator[MaybeDeleteBranchStep]:
-        # Before this point in the list, we can assume we've already checked the commit.
+        """
+        The split should be the point in the list of commits where all the earlier
+        commits have already been checked in a previous invocation of the CLI.
+        """
+        if not self.commits:
+            return
+
         split = self.commits.index(self.checked) if self.checked is not None else len(self.commits)
 
         for index, commit in enumerate(self.commits):
