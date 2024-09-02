@@ -22,15 +22,22 @@ class IdenticalBranches(GitException):
     pass
 
 
-def list_merged_heads(repo: git.Repo, into: git.Reference) -> typing.Sequence[git.Head]:
-    rc, stdout, stderr = repo.git.branch(
-        "--list",
-        "--format=%(refname:short)",
-        "--merged",
-        into.name,
-        with_extended_output=True,
-    )
-    return [repo.heads[line.lstrip()] for line in stdout.splitlines()]
+def _list_heads(repo: git.Repo, *args: str | git.Reference) -> typing.Sequence[typing.Tuple[git.Head, bool]]:
+    """
+    See 'build_format()' in 'builtin/branch.c' for exact output formatting.
+    https://github.com/git/git/blob/master/builtin/branch.c#L390
+    """
+    rc, stdout, stderr = repo.git.branch("--list", *args, with_extended_output=True)
+    lines = [(line[2:], line[0]) for line in stdout.splitlines()]
+    return [(repo.heads[name], indicator in {"*", "+"}) for name, indicator in lines]
+
+
+def list_merged_heads(repo: git.Repo, into: git.Reference) -> set[git.Head]:
+    return {head for head, in_use in _list_heads(repo, "--merged", into.name) if not in_use}
+
+
+def list_in_use_heads(repo: git.Repo) -> set[git.Head]:
+    return {head for head, in_use in _list_heads(repo) if in_use}
 
 
 def find_merge_base(

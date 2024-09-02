@@ -16,6 +16,7 @@ import git
 from switchbox.ext.git import (
     contains_equivalent,
     is_squash_commit,
+    list_in_use_heads,
     list_merged_heads,
     potential_squash_commits,
 )
@@ -70,7 +71,7 @@ class MaybeDeleteMergedBranchPlan(MaybeDeleteBranchPlan):
 @dataclasses.dataclass()
 class MaybeDeleteRebasedBranchPlan(MaybeDeleteBranchPlan):
     repo: git.Repo
-    head: git.Head = dataclasses.field(kw_only=True)
+    head: git.Head = dataclasses.field()
     upstream: git.Reference = dataclasses.field(kw_only=True)
 
     merged: bool = dataclasses.field(default=False, init=False)
@@ -337,16 +338,16 @@ class Repo:
             self.gitpython.delete_head(head, force=force)
 
     def _heads(self):
-        return (
-            head for head in self.gitpython.heads if head.name not in {self.remote_default_branch, self.default_branch}
-        )
+        """Exclude the default branch and worktrees."""
+        exclude = list_in_use_heads(self.gitpython) | {self.gitpython.heads[self.default_branch]}
+        return (head for head in self.gitpython.heads if head not in exclude)
 
     def plan_delete_merged_branches(self, upstream: git.Reference) -> list[MaybeDeleteMergedBranchPlan]:
-        merged = set(list_merged_heads(self.gitpython, upstream))
+        merged = list_merged_heads(self.gitpython, upstream)
         return [MaybeDeleteMergedBranchPlan(head, merged) for head in self._heads()]
 
     def plan_delete_rebased_branches(self, upstream: git.Reference) -> list[MaybeDeleteBranchPlan]:
-        return [MaybeDeleteRebasedBranchPlan(self.gitpython, head=head, upstream=upstream) for head in self._heads()]
+        return [MaybeDeleteRebasedBranchPlan(self.gitpython, h, upstream=upstream) for h in self._heads()]
 
     def plan_delete_squashed_branches(self, upstream: git.Reference) -> list[MaybeDeleteSquashedBranchPlan]:
         with self.gitpython.config_reader("repository") as reader:

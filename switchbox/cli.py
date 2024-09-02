@@ -1,4 +1,3 @@
-import itertools
 import logging
 import os
 import typing
@@ -20,6 +19,28 @@ dry_run_option = click.option(
     "--dry-run/--no-dry-run",
     default=False,
     is_flag=True,
+)
+
+option_merged = click.option(
+    "--merged/--no-merged",
+    "enable_merged",
+    default=True,
+    is_flag=True,
+    help="Include merged branches.",
+)
+option_rebased = click.option(
+    "--rebased/--no-rebased",
+    "enable_rebased",
+    default=True,
+    is_flag=True,
+    help="Include rebased branches.",
+)
+option_squashed = click.option(
+    "--squashed/--no-squashed",
+    "enable_squashed",
+    default=True,
+    is_flag=True,
+    help="Include squashed branches.",
 )
 
 
@@ -176,8 +197,18 @@ def sparse(app: Application) -> None:
 @main.command()
 @dry_run_option
 @remote_update_option
+@option_merged
+@option_rebased
+@option_squashed
 @click.pass_obj
-def tidy(app: Application, dry_run: bool, update_remotes: bool) -> None:
+def tidy(
+    app: Application,
+    dry_run: bool,
+    enable_merged: bool,
+    enable_rebased: bool,
+    enable_squashed: bool,
+    update_remotes: bool,
+) -> None:
     """
     Cleans up branches.
 
@@ -186,7 +217,13 @@ def tidy(app: Application, dry_run: bool, update_remotes: bool) -> None:
     """
     if update_remotes:
         app.update_remotes()
-    app.remove_branches(dry_run=dry_run)
+
+    app.remove_branches(
+        dry_run=dry_run,
+        enable_merged=enable_merged,
+        enable_rebased=enable_rebased,
+        enable_squashed=enable_squashed,
+    )
 
 
 @main.command()

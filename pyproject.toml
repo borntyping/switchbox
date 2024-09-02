@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "switchbox"
-version = "0.7.0"
+version = "0.8.0"
 readme = "README.md"
 description = "Tools for working with Git repositories."
 homepage = "https://pypi.org/project/switchbox/"
@@ -39,7 +39,7 @@ git-switchbox = "switchbox.cli:main"
 switchbox = "switchbox.cli:main"
 
 [tool.black]
-line-length = 120
+line-length = 128
 
 [tool.mypy]
 files = ["switchbox"]

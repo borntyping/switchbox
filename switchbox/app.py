@@ -153,28 +153,45 @@ class Application:
             self.repo.switch(self.repo.default_branch)
         output.done("Switched to the {default_branch} branch.")
 
-    def remove_branches(self, dry_run: bool = True) -> None:
+    def remove_branches(
+        self,
+        enable_merged: bool = True,
+        enable_rebased: bool = True,
+        enable_squashed: bool = True,
+        dry_run: bool = True,
+    ) -> None:
         upstream = self.repo.gitpython.references[self.repo.remote_default_branch]
-        remove_upstream_branches = RemoveBranches(
-            plans=self.repo.plan_delete_merged_branches(upstream),
-            force=False,
-            description="[green]merged[/]",
-        )
-        remove_rebased_branches = RemoveBranches(
-            plans=self.repo.plan_delete_rebased_branches(upstream),
-            force=True,
-            description="[yellow]rebased[/]",
-        )
-        remove_squashed_branches = RemoveBranches(
-            plans=self.repo.plan_delete_squashed_branches(upstream),
-            force=True,
-            description="[magenta]squashed[/]",
-        )
-        remove_branches: typing.Sequence[RemoveBranches] = [
-            remove_upstream_branches,
-            remove_rebased_branches,
-            remove_squashed_branches,
-        ]
+        remove_branches: typing.MutableSequence[RemoveBranches] = []
+
+        if enable_merged:
+            remove_merged_branches = RemoveBranches(
+                description="[green]merged[/]",
+                plans=self.repo.plan_delete_merged_branches(upstream),
+                force=False,
+            )
+            remove_branches.append(remove_merged_branches)
+
+        if enable_rebased:
+            remove_rebased_branches = RemoveBranches(
+                description="[yellow]rebased[/]",
+                plans=self.repo.plan_delete_rebased_branches(upstream),
+                force=True,
+            )
+            remove_branches.append(remove_rebased_branches)
+
+        if enable_squashed:
+            remove_squashed_branches = RemoveBranches(
+                description="[magenta]squashed[/]",
+                plans=self.repo.plan_delete_squashed_branches(upstream),
+                force=True,
+            )
+            remove_branches.append(remove_squashed_branches)
+        else:
+            remove_squashed_branches = None
+
+        if not remove_branches:
+            Output().dry_run("All branch selections are disabled")
+            return
 
         with rich.progress.Progress(
             rich.progress.SpinnerColumn(
@@ -230,8 +247,9 @@ class Application:
                     self.repo.delete_branches(branches, force=rb.force)
                 output.done("Found and removed {one} {branch} " "that {was} {merged} into {target}: {items}.")
 
-        with Output(merged=remove_squashed_branches.description).status("Recording {merged} comparisons..."):
-            self.repo.done_delete_squashed_branches(upstream, remove_squashed_branches.plans)
+        if remove_squashed_branches is not None:
+            with Output(merged=remove_squashed_branches.description).status("Recording {merged} comparisons..."):
+                self.repo.done_delete_squashed_branches(upstream, remove_squashed_branches.plans)
 
     def rebase_active_branch(self) -> typing.Tuple[str, str]:
         """Rebase the active branch on top of the remote default branch."""
