@@ -335,6 +335,10 @@ class Repo:
             if self.gitpython.active_branch == head:
                 raise Exception("Refusing to remove the active branch")
 
+            if not head.is_valid():
+                logger.warning("Head %(head)s is not valid", {"head": head.name})
+                return
+
             self.gitpython.delete_head(head, force=force)
 
     def _heads(self):

@@ -231,8 +231,8 @@ class Application:
 
             output = Output(
                 merged=rb.description,
-                one=len(branches),
-                branch=p.plural("branch", len(branches)),
+                n=len(branches),
+                branches=p.plural("branch", len(branches)),
                 was=p.plural_verb("was", len(branches)),
                 target=Output.format_branch(self.repo.default_branch),
                 items=Output.format_branches([head.name for head in branches]),
@@ -241,11 +241,11 @@ class Application:
             if not branches:
                 output.done("There are no branches that have been {merged} into {target}.")
             elif dry_run:
-                output.dry_run("Found {one} {branch} that {was} {merged} into {target} and can be removed: {items}.")
+                output.dry_run("Found {n} {branches} that {was} {merged} into {target} and can be removed: {items}.")
             else:
-                with output.status("Removing {merged} {branch}..."):
+                with output.status("Removing {merged} {branches}..."):
                     self.repo.delete_branches(branches, force=rb.force)
-                output.done("Found and removed {one} {branch} " "that {was} {merged} into {target}: {items}.")
+                output.done("Found and removed {n} {branches} that {was} {merged} into {target}: {items}.")
 
         if remove_squashed_branches is not None:
             with Output(merged=remove_squashed_branches.description).status("Recording {merged} comparisons..."):
