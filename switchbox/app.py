@@ -264,14 +264,14 @@ class Application:
     def rebase_and_push_active_branch(self):
         before, after = self.rebase_active_branch()
         output = Output(**self.context)
-        with output.status("Force pushing from {default_branch} to {default_remote}/{active_branch}..."):
+        with output.status("Force pushing from {active_branch} to {default_remote}/{active_branch}..."):
             self.repo.force_push(
                 remote=self.repo.default_remote,
                 local_branch=self.repo.active_branch,
                 remote_branch=self.repo.active_branch,
                 expect=before,
             )
-        output.done("Force pushed from {default_branch} to {default_remote}/{active_branch}.")
+        output.done("Force pushed from {active_branch} to {default_remote}/{active_branch}.")
 
     def configure_sparse_checkout(self) -> None:
         output = Output()
