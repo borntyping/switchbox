@@ -11,14 +11,12 @@ import rich.status
 import rich.table
 import rich.theme
 
-from switchbox.repo import MaybeDeleteBranchPlan, Repo
-
-T = typing.TypeVar("T")
-P = typing.TypeVar("P", bound=MaybeDeleteBranchPlan)
+from switchbox.branches import BranchManager
+from switchbox.repo import Repo
 
 OutputContextValue = typing.Union[typing.Callable[[], typing.Any], typing.Any]
 
-console = rich.console.Console(
+CONSOLE = rich.console.Console(
     theme=rich.theme.Theme(
         {
             "branch": "cyan",
@@ -48,9 +46,11 @@ class OutputContext(collections.UserDict[str, OutputContextValue]):
 
 @dataclasses.dataclass()
 class Output:
+    console: rich.console.Console
     context: OutputContext
 
-    def __init__(self, **context: OutputContextValue) -> None:
+    def __init__(self, console: rich.console.Console = CONSOLE, **context: OutputContextValue) -> None:
+        self.console = console
         self.context = OutputContext(context)
 
     def format(self, text: str) -> str:
@@ -60,35 +60,24 @@ class Output:
         return rich.status.Status(self.format(text), speed=2.0)
 
     def done(self, task: str) -> None:
-        console.print("[green]✓[/]", self.format(task), highlight=False)
+        self.console.print("[bar.finished]✓[/]", self.format(task), highlight=False)
 
     def enabled(self, task: str) -> None:
-        console.print("[yellow]✓[/]", self.format(task), highlight=False)
+        self.console.print("[yellow]✓[/]", self.format(task), highlight=False)
 
     def disabled(self, task: str) -> None:
-        console.print("[red]✓[/]", self.format(task), highlight=False)
+        self.console.print("[red]✓[/]", self.format(task), highlight=False)
 
     def dry_run(self, task: str) -> None:
-        console.print("[yellow]➔[/]", self.format(task), highlight=False)
+        self.console.print("[yellow]➔[/]", self.format(task), highlight=False)
 
     @classmethod
     def format_branch(cls, branch: str | None) -> str:
         return f"[branch]{branch}[/]" if branch else "[red]UNSET[/]"
 
     @classmethod
-    def format_branches(cls, branches: typing.Collection[str]) -> str:
-        return p.join([f"[branch]{branch}[/]" for branch in sorted(branches)])
-
-    @classmethod
     def format_remote(cls, remote: str | None) -> str:
         return f"[remote]{remote}[/]" if remote else "[red]UNSET[/]"
-
-
-@dataclasses.dataclass()
-class RemoveBranches(typing.Generic[P]):
-    description: str
-    plans: typing.Sequence[P]
-    force: bool = dataclasses.field(default=False)
 
 
 @dataclasses.dataclass()
@@ -160,43 +149,10 @@ class Application:
         enable_squashed: bool = True,
         dry_run: bool = True,
     ) -> None:
-        upstream = self.repo.gitpython.references[self.repo.remote_default_branch]
-        remove_branches: typing.MutableSequence[RemoveBranches] = []
-
-        if enable_merged:
-            remove_merged_branches = RemoveBranches(
-                description="[green]merged[/]",
-                plans=self.repo.plan_delete_merged_branches(upstream),
-                force=False,
-            )
-            remove_branches.append(remove_merged_branches)
-
-        if enable_rebased:
-            remove_rebased_branches = RemoveBranches(
-                description="[yellow]rebased[/]",
-                plans=self.repo.plan_delete_rebased_branches(upstream),
-                force=True,
-            )
-            remove_branches.append(remove_rebased_branches)
-
-        if enable_squashed:
-            remove_squashed_branches = RemoveBranches(
-                description="[magenta]squashed[/]",
-                plans=self.repo.plan_delete_squashed_branches(upstream),
-                force=True,
-            )
-            remove_branches.append(remove_squashed_branches)
-        else:
-            remove_squashed_branches = None
-
-        if not remove_branches:
-            Output().dry_run("All branch selections are disabled")
-            return
-
         with rich.progress.Progress(
             rich.progress.SpinnerColumn(
                 style="bar.complete",
-                finished_text="[bar.finished]➔[/]",
+                finished_text="[bar.finished]✓[/]",
             ),
             rich.progress.TextColumn(
                 text_format="[progress.description]{task.description}",
@@ -204,52 +160,65 @@ class Application:
             ),
             rich.progress.BarColumn(),
             rich.progress.TaskProgressColumn(),
-            rich.progress.MofNCompleteColumn(table_column=rich.table.Column(width=9, justify="right")),
-            rich.progress.TimeRemainingColumn(),
-            rich.progress.TextColumn("{task.fields[plan]}"),
-            rich.progress.TextColumn("{task.fields[step]}"),
+            rich.progress.MofNCompleteColumn(table_column=rich.table.Column(width=9, justify="center")),
+            rich.progress.TimeElapsedColumn(),
+            console=CONSOLE,
         ) as progress:
-            for rb in remove_branches:
-                total = sum(len(plan) for plan in rb.plans)
-                task = progress.add_task(f"Finding {rb.description} commits...", total=total, plan="", step="")
-
-                # Completed holds the total of all completed *plans*, since we can skip steps in a plan.
-                completed = 0
-                for plan in rb.plans:
-                    progress.update(task, completed=completed, plan=plan)
-                    # If *any* step returns true, we can skip the remaining steps in the plan.
-                    for step in plan:
-                        progress.update(task, completed=completed + step.index, step=step)
-                        # Executing a step should set plan.merged if the step found the branch was merged.
-                        if plan.merged:
-                            break
-                    completed += len(plan)
-                progress.update(task, completed=completed, plan="", step="")
-
-        for rb in remove_branches:
-            branches = [plan.head for plan in rb.plans if plan.merged]
-
-            output = Output(
-                merged=rb.description,
-                n=len(branches),
-                branches=p.plural("branch", len(branches)),
-                was=p.plural_verb("was", len(branches)),
-                target=Output.format_branch(self.repo.default_branch),
-                items=Output.format_branches([head.name for head in branches]),
+            task_id = progress.add_task("Finding inactive branches...", total=False)
+            branch_manager = BranchManager.from_repo(
+                repo=self.repo.gitpython,
+                local_default_branch=self.repo.default_branch,
+                remote_default_branch=self.repo.remote_default_branch,
+            )
+            branch_manager.load_config()
+            progress.update(
+                task_id=task_id,
+                total=len(branch_manager.branches),
+                completed=len(branch_manager.branches),
             )
 
-            if not branches:
-                output.done("There are no branches that have been {merged} into {target}.")
-            elif dry_run:
-                output.dry_run("Found {n} {branches} that {was} {merged} into {target} and can be removed: {items}.")
-            else:
-                with output.status("Removing {merged} {branches}..."):
-                    self.repo.delete_branches(branches, force=rb.force)
-                output.done("Found and removed {n} {branches} that {was} {merged} into {target}: {items}.")
+            if enable_merged:
+                for set_branch_is_merged in progress.track(
+                    sequence=branch_manager.set_branch_is_merged_steps,
+                    description="Finding [green]merged[/] commits...",
+                ):
+                    set_branch_is_merged()
 
-        if remove_squashed_branches is not None:
-            with Output(merged=remove_squashed_branches.description).status("Recording {merged} comparisons..."):
-                self.repo.done_delete_squashed_branches(upstream, remove_squashed_branches.plans)
+            if enable_rebased:
+                for set_branch_is_rebased in progress.track(
+                    sequence=branch_manager.set_branch_is_rebased_steps,
+                    description="Finding [yellow]rebased[/] commits...",
+                ):
+                    set_branch_is_rebased()
+
+            if enable_squashed:
+                for set_branch_is_squashed in progress.track(
+                    sequence=branch_manager.set_branch_is_squashed_steps,
+                    description="Finding [magenta]squashed[/] commits...",
+                ):
+                    set_branch_is_squashed()
+
+            for branch in progress.track(
+                sequence=branch_manager.branches_to_remove,
+                total=len(branch_manager.branches_to_remove),
+                description="Tidying branches...",
+            ):
+                merged = []
+                if branch.is_merged:
+                    merged.append("[green]merged[/]")
+                if branch.is_rebased:
+                    merged.append("[yellow]rebased[/]")
+                if branch.is_squashed:
+                    merged.append("[magenta]squashed[/]")
+
+                output = Output(branch=branch.head.name, merged=merged, upstream=branch.upstream.name)
+                if dry_run:
+                    output.dry_run("Branch {branch} was {merged} into {upstream} and can be removed.")
+                else:
+                    branch.delete()
+                    output.done("Branch {branch} was {merged} into {upstream} and was removed.")
+
+        branch_manager.save_config()
 
     def rebase_active_branch(self) -> typing.Tuple[str, str]:
         """Rebase the active branch on top of the remote default branch."""

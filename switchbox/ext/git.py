@@ -63,6 +63,7 @@ def find_merge_base(
 
 def contains_equivalent(
     repo: git.Repo,
+    *,
     upstream: git.refs.Head,
     head: git.refs.Head,
 ) -> bool:

@@ -5,7 +5,7 @@ import typing
 import click.globals
 import git
 
-from switchbox.app import Application
+from switchbox.app import Application, CONSOLE
 from switchbox.repo import Config, Repo
 
 remote_update_option = click.option(
