@@ -3,6 +3,7 @@ import dataclasses
 import logging
 import typing
 
+import git
 import inflect
 import rich
 import rich.console
@@ -11,7 +12,7 @@ import rich.status
 import rich.table
 import rich.theme
 
-from switchbox.branches import BranchManager
+from switchbox.branches import Branch, BranchManager
 from switchbox.repo import Repo
 
 OutputContextValue = typing.Union[typing.Callable[[], typing.Any], typing.Any]
@@ -44,17 +45,24 @@ class OutputContext(collections.UserDict[str, OutputContextValue]):
         return value() if callable(value) else value
 
 
+OutputContextType = typing.Mapping[str, OutputContextValue]
+
+
 @dataclasses.dataclass()
 class Output:
     console: rich.console.Console
     context: OutputContext
+
+    is_merged: typing.ClassVar[str] = "[green]merged[/]"
+    is_rebased: typing.ClassVar[str] = "[yellow]rebased[/]"
+    is_squashed: typing.ClassVar[str] = "[magenta]squashed[/]"
 
     def __init__(self, console: rich.console.Console = CONSOLE, **context: OutputContextValue) -> None:
         self.console = console
         self.context = OutputContext(context)
 
     def format(self, text: str) -> str:
-        return text.format_map(self.context)
+        return text.format_map({**self.default_context(), **self.context})
 
     def status(self, text: str) -> rich.status.Status:
         return rich.status.Status(self.format(text), speed=2.0)
@@ -69,7 +77,7 @@ class Output:
         self.console.print("[red]✓[/]", self.format(task), highlight=False)
 
     def dry_run(self, task: str) -> None:
-        self.console.print("[yellow]➔[/]", self.format(task), highlight=False)
+        self.console.print("[yellow]✓[/]", self.format(task), highlight=False)
 
     @classmethod
     def format_branch(cls, branch: str | None) -> str:
@@ -78,6 +86,25 @@ class Output:
     @classmethod
     def format_remote(cls, remote: str | None) -> str:
         return f"[remote]{remote}[/]" if remote else "[red]UNSET[/]"
+
+    @classmethod
+    def format_reference(cls, ref: git.Reference) -> str:
+        return f"{cls.format_remote(ref.remote_name)}/{cls.format_branch(ref.remote_head)}"
+
+    @classmethod
+    def default_context(cls) -> OutputContextType:
+        return {"merged": cls.is_merged, "rebased": cls.is_rebased, "squashed": cls.is_squashed}
+
+    @classmethod
+    def merged(cls, branch: Branch) -> str:
+        merged = []
+        if branch.is_merged:
+            merged.append(cls.is_merged)
+        if branch.is_rebased:
+            merged.append(cls.is_rebased)
+        if branch.is_squashed:
+            merged.append(cls.is_squashed)
+        return p.join(merged)
 
 
 @dataclasses.dataclass()
@@ -96,10 +123,6 @@ class Application:
             active_branch=lambda: Output.format_branch(self.repo.active_branch),
             default_branch=lambda: Output.format_branch(self.repo.default_branch),
             default_remote=lambda: Output.format_remote(self.repo.default_remote),
-            default_remote_branch=lambda: "{}/{}".format(
-                Output.format_branch(self.repo.default_branch),
-                Output.format_remote(self.repo.default_remote),
-            ),
         )
 
     def set_default_branch(self, branch: str) -> None:
@@ -176,47 +199,43 @@ class Application:
                 total=len(branch_manager.branches),
                 completed=len(branch_manager.branches),
             )
+            output = Output()
 
             if enable_merged:
                 for set_branch_is_merged in progress.track(
                     sequence=branch_manager.set_branch_is_merged_steps,
-                    description="Finding [green]merged[/] commits...",
+                    description=output.format("Finding {merged} commits..."),
                 ):
                     set_branch_is_merged()
 
             if enable_rebased:
                 for set_branch_is_rebased in progress.track(
                     sequence=branch_manager.set_branch_is_rebased_steps,
-                    description="Finding [yellow]rebased[/] commits...",
+                    description=output.format("Finding {rebased} commits..."),
                 ):
                     set_branch_is_rebased()
 
             if enable_squashed:
                 for set_branch_is_squashed in progress.track(
                     sequence=branch_manager.set_branch_is_squashed_steps,
-                    description="Finding [magenta]squashed[/] commits...",
+                    description=output.format("Finding {squashed} commits..."),
                 ):
                     set_branch_is_squashed()
 
-            for branch in progress.track(
-                sequence=branch_manager.branches_to_remove,
-                total=len(branch_manager.branches_to_remove),
-                description="Tidying branches...",
-            ):
-                merged = []
-                if branch.is_merged:
-                    merged.append("[green]merged[/]")
-                if branch.is_rebased:
-                    merged.append("[yellow]rebased[/]")
-                if branch.is_squashed:
-                    merged.append("[magenta]squashed[/]")
+        for branch in branch_manager.branches_to_remove:
+            output = Output(
+                branch=Output.format_branch(branch.head.name),
+                merged=Output.merged(branch),
+                upstream=Output.format_reference(branch.upstream),
+                removed="force removed" if branch.use_force_when_removing else "removed",
+            )
 
-                output = Output(branch=branch.head.name, merged=merged, upstream=branch.upstream.name)
-                if dry_run:
-                    output.dry_run("Branch {branch} was {merged} into {upstream} and can be removed.")
-                else:
-                    branch.delete()
-                    output.done("Branch {branch} was {merged} into {upstream} and was removed.")
+            if dry_run:
+                output.dry_run("Branch {branch} was {merged} into {upstream} and can be {removed}.")
+                continue
+
+            branch.delete()
+            output.done("Branch {branch} was {merged} into {upstream} and was {removed}.")
 
         branch_manager.save_config()
 
