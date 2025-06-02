@@ -271,3 +271,8 @@ class Application:
         with output.status("Reapplying sparse-checkout..."):
             self.repo.sparse_checkout_reapply()
         output.done("Reapplied sparse-checkout.")
+
+    def clean_config(self):
+        output = Output()
+        for section in self.repo.clean_config():
+            output.done(f"Removed section '{section}'")

@@ -8,6 +8,7 @@ branch we compare, which is why the algorithm is broken up so much.
 import dataclasses
 import logging
 import pathlib
+import re
 import typing
 
 import click
@@ -221,3 +222,10 @@ class Repo:
 
     def sparse_checkout_reapply(self) -> None:
         self.gitpython.git._call_process("sparse-checkout", "reapply")
+
+    def clean_config(self) -> typing.Iterable[str]:
+        with self.gitpython.config_writer() as writer:
+            sections = [s for s in writer.sections() if re.match(rf"{SECTION} \".+\"", s)]
+            for section in sections:
+                writer.remove_section(section)
+                yield section

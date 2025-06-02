@@ -136,6 +136,12 @@ def config_set_default_remote(app: Application, remote: str) -> None:
     app.set_default_remote(remote)
 
 
+@config.command(name="clean")
+@click.pass_obj
+def config_clean(app: Application) -> None:
+    app.clean_config()
+
+
 @main.command()
 @dry_run_option
 @remote_update_option
