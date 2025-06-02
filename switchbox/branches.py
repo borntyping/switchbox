@@ -53,7 +53,7 @@ class Branch:
 
     @property
     def use_force_when_removing(self) -> bool:
-        return bool(self.is_rebased or self.is_rebased)
+        return bool(self.is_rebased or self.is_squashed)
 
     @property
     def subsection(self) -> str:
