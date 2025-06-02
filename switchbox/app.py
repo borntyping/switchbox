@@ -171,6 +171,7 @@ class Application:
         enable_rebased: bool = True,
         enable_squashed: bool = True,
         dry_run: bool = True,
+        names: typing.Collection[str] = (),
     ) -> None:
         with rich.progress.Progress(
             rich.progress.SpinnerColumn(
@@ -192,7 +193,7 @@ class Application:
                 repo=self.repo.gitpython,
                 local_default_branch=self.repo.default_branch,
                 remote_default_branch=self.repo.remote_default_branch,
-            )
+            ).filter_branches(names)
             branch_manager.load_config()
             progress.update(
                 task_id=task_id,

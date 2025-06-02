@@ -92,10 +92,19 @@ def potential_squash_commits(
     a: git.refs.Head,
     b: git.refs.Head,
 ) -> tuple[git.DiffIndex, typing.Sequence[git.Commit]]:
+    """
+    Check if B has been merged into A with a squash commit.
+
+    This only prepares work, you'll need to call 'is_squash_commit' to check
+    each commit.
+
+    This works by finding the common ancestor / merge base M, and checking if
+    the diff of (B, M) matches a commit in M..A.
+    """
     if a == b:
         raise IdenticalBranches("Not checking for squash commits, branches are identical")
 
-    logger.info("Checking if '%(b)s' was squashed into '%(a)s'", {"a": a, "b": b})
+    logger.info("Finding potential squash commits for '%(b)s' into '%(a)s'", {"a": a, "b": b})
 
     merge_base = find_merge_base(repo, a, b)
 
@@ -108,9 +117,12 @@ def potential_squash_commits(
     return diff, list(reversed(commits(repo, r1=merge_base, r2=a)))
 
 
-def is_squash_commit(repo: git.Repo, commit: git.Commit, diff: git.DiffIndex):
+def commit_matches_diff(commit: git.Commit, diff: git.DiffIndex):
     """
     Check if a commit matches a given diff.
+
+    This doesn't seem to catch some diffs, maybe where the files changed on the
+    upstream branch and GitHub automatically resolved conflicts.
     """
     if len(commit.parents) == 0:
         logger.debug("Skipping commit with no parents %(c)s", {"c": commit})
@@ -118,29 +130,7 @@ def is_squash_commit(repo: git.Repo, commit: git.Commit, diff: git.DiffIndex):
     elif len(commit.parents) >= 2:
         logger.debug("Skipping merge commit %(c)s", {"c": commit})
         return False
-    else:
-        parent = commit.parents[0]
 
-    return commit.diff(parent) == diff
-
-
-def contains_squash_commit(
-    repo: git.Repo,
-    a: git.refs.Head,
-    b: git.refs.Head,
-) -> bool | None:
-    """
-    Checks if B has been merged into A with a squash commit.
-
-    This works by finding the common ancestor / merge base M, and checking if the diff
-    of (B, M) matches a commit in M..A.
-    """
-    for commit, diff in potential_squash_commits(repo, a, b):
-        logger.info(
-            "Checking if '%(b)s' was squashed into '%(a)s' by %(c).7s",
-            {"a": a, "b": b, "c": commit},
-        )
-        if is_squash_commit(repo, commit, diff):
-            return True
-
-    return False
+    parent = commit.parents[0]
+    parent_diff = commit.diff(parent)
+    return all((x == y for x, y in zip(parent_diff, diff)))

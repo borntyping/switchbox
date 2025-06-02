@@ -6,7 +6,7 @@ import git
 
 from switchbox.ext.git import (
     contains_equivalent,
-    is_squash_commit,
+    commit_matches_diff,
     list_in_use_heads,
     list_merged_heads,
     potential_squash_commits,
@@ -98,6 +98,7 @@ class SetBranchIsMergedStep:
         return str(self.branch)
 
     def __call__(self) -> None:
+        logging.info("Checking if '%(branch)s' was merged", {"branch": self.branch})
         self.branch.is_merged = self.branch.head in list_merged_heads(
             repo=self.branch.repo,
             into=self.branch.upstream,
@@ -116,6 +117,7 @@ class SetBranchIsRebasedStep:
         return str(self.branch)
 
     def __call__(self) -> None:
+        logging.info("Checking if '%(branch)s' was rebased", {"branch": self.branch})
         self.branch.is_rebased = contains_equivalent(
             repo=self.branch.repo,
             upstream=self.branch.upstream,
@@ -139,14 +141,26 @@ class SetBranchIsSquashedStep:
 
     def __call__(self) -> None:
         if self.branch.is_squashed:
+            logging.debug(
+                "Branch has already been marked as squashed (branch='%(branch)s', commit='%(commit)s')",
+                {"branch": self.branch, "commit": self.commit},
+            )
             return
 
         if self.skip:
+            logging.debug(
+                "Branch has already been marked as skipped (branch='%(branch)s', commit='%(commit)s')",
+                {"branch": self.branch, "commit": self.commit},
+            )
             return
 
-        self.branch.is_squashed = is_squash_commit(self.branch.repo, self.commit, self.diff)
+        self.branch.is_squashed = commit_matches_diff(self.commit, self.diff)
         self.branch.last_compared_upstream = self.branch.upstream
         self.branch.last_compared_commit = self.commit
+        logging.info(
+            "Checked if branch was squashed (branch='%(branch)s', commit='%(commit)s', is_squashed=%(is_squashed)s)",
+            {"branch": self.branch, "commit": self.commit, "is_squashed": self.branch.is_squashed},
+        )
 
     @classmethod
     def from_branches(cls, branches: list[Branch]) -> list[typing.Self]:
@@ -169,22 +183,36 @@ class SetBranchIsSquashedStep:
 @dataclasses.dataclass
 class BranchManager:
     branches: list[Branch]
-    set_branch_is_merged_steps: list[SetBranchIsMergedStep]
-    set_branch_is_rebased_steps: list[SetBranchIsRebasedStep]
-    set_branch_is_squashed_steps: list[SetBranchIsSquashedStep]
 
     @classmethod
-    def from_repo(cls, repo: git.Repo, local_default_branch: str, remote_default_branch: str) -> typing.Self:
+    def from_repo(
+        cls,
+        repo: git.Repo,
+        local_default_branch: str,
+        remote_default_branch: str,
+    ) -> typing.Self:
         upstream = repo.references[remote_default_branch]
         ignore = list_in_use_heads(repo) | {repo.heads[local_default_branch]}
         heads = [head for head in repo.heads if head not in ignore]
         branches = [Branch.from_repo(repo, head, upstream) for head in heads]
-        return cls(
-            branches=branches,
-            set_branch_is_merged_steps=SetBranchIsMergedStep.from_branches(branches),
-            set_branch_is_rebased_steps=SetBranchIsRebasedStep.from_branches(branches),
-            set_branch_is_squashed_steps=SetBranchIsSquashedStep.from_branches(branches),
-        )
+        return cls(branches=branches)
+
+    def filter_branches(self, names: typing.Collection[str]) -> typing.Self:
+        if not names:
+            return self
+        return dataclasses.replace(self, branches=[b for b in self.branches if b.head.name in names])
+
+    @property
+    def set_branch_is_merged_steps(self) -> list[SetBranchIsMergedStep]:
+        return SetBranchIsMergedStep.from_branches(self.branches)
+
+    @property
+    def set_branch_is_rebased_steps(self) -> list[SetBranchIsRebasedStep]:
+        return SetBranchIsRebasedStep.from_branches(self.branches)
+
+    @property
+    def set_branch_is_squashed_steps(self) -> list[SetBranchIsSquashedStep]:
+        return SetBranchIsSquashedStep.from_branches(self.branches)
 
     @property
     def branches_to_remove(self) -> list[Branch]:

@@ -4,6 +4,7 @@ import typing
 
 import click.globals
 import git
+import rich.logging
 
 from switchbox.app import Application, CONSOLE
 from switchbox.repo import Config, Repo
@@ -13,7 +14,7 @@ remote_update_option = click.option(
     "update_remotes",
     default=True,
     is_flag=True,
-    help="Run 'git remote update --prune' before anything else.",
+    help="Run 'git remote update --prune' first.",
 )
 dry_run_option = click.option(
     "--dry-run/--no-dry-run",
@@ -70,7 +71,11 @@ def main(ctx: click.Context, path: typing.Optional[os.PathLike], verbose: int) -
         2: logging.INFO,
         3: logging.DEBUG,
     }
-    logging.basicConfig(level=verbosity[verbose])
+    logging.basicConfig(
+        level=verbosity[verbose],
+        format="%(message)s",
+        handlers=[rich.logging.RichHandler(console=CONSOLE, show_time=False)],
+    )
 
     ctx.obj = Application(
         repo=Repo(
@@ -206,6 +211,7 @@ def sparse(app: Application) -> None:
 @option_merged
 @option_rebased
 @option_squashed
+@click.argument("branch", type=click.STRING, nargs=-1)
 @click.pass_obj
 def tidy(
     app: Application,
@@ -214,6 +220,7 @@ def tidy(
     enable_rebased: bool,
     enable_squashed: bool,
     update_remotes: bool,
+    branch: list[str],
 ) -> None:
     """
     Cleans up branches.
@@ -229,6 +236,7 @@ def tidy(
         enable_merged=enable_merged,
         enable_rebased=enable_rebased,
         enable_squashed=enable_squashed,
+        names=branch,
     )
 
 
