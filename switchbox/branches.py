@@ -168,12 +168,35 @@ class SetBranchIsSquashedStep:
         for branch in branches:
             diff, commits = potential_squash_commits(repo=branch.repo, a=branch.upstream, b=branch.head)
 
-            # We can skip any commits before lastComparedCommit (as long as
-            # we're checking the same upstream).
-            if branch.upstream == branch.last_compared_upstream:
-                pivot = commits.index(branch.last_compared_commit)
-            else:
+            # We can skip any commits before last_compared_commit as long as
+            # we're checking the same upstream.
+            if branch.upstream != branch.last_compared_upstream:
+                logging.debug(
+                    "Upstream doesn't match last compared upstream, resetting "
+                    "(branch='%(branch)s', upstream='%(upstream)s', last_compared_upstream='%(last_compared_upstream)s')",
+                    {
+                        "branch": branch,
+                        "upstream": branch.upstream,
+                        "last_compared_upstream": branch.last_compared_upstream,
+                    },
+                )
+                branch.last_compared_upstream = None
+                branch.last_compared_commit = None
                 pivot = 0
+            elif branch.last_compared_commit not in commits:
+                logging.debug(
+                    "Last compared commit is not longer in the branch, resetting "
+                    "(branch='%(branch)s', last_compared_commit='%(last_compared_commit)s')",
+                    {
+                        "branch": branch,
+                        "last_compared_commit": branch.last_compared_commit,
+                    },
+                )
+                branch.last_compared_upstream = None
+                branch.last_compared_commit = None
+                pivot = 0
+            else:
+                pivot = commits.index(branch.last_compared_commit)
 
             for index, commit in enumerate(commits):
                 steps.append(cls(branch=branch, commit=commit, diff=diff, skip=index < pivot))

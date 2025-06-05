@@ -41,6 +41,9 @@ switchbox = "switchbox.cli:main"
 [tool.black]
 line-length = 128
 
+[tool.ruff]
+line-length = 128
+
 [tool.mypy]
 files = ["switchbox"]
 python_version = 3.13

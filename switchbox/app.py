@@ -147,12 +147,12 @@ class Application:
     def update_default_branch(self) -> None:
         output = Output(**self.context)
 
-        with output.status("Updating branch {default_branch} " "to match {default_remote}/{default_branch}."):
+        with output.status("Updating branch {default_branch} to match {default_remote}/{default_branch}."):
             self.repo.update_branch_from_remote(
                 remote=self.repo.default_remote,
                 branch=self.repo.default_branch,
             )
-        output.done("Updated branch {default_branch} " "to match {default_branch}/{default_remote}.")
+        output.done("Updated branch {default_branch} to match {default_branch}/{default_remote}.")
 
     def switch_default_branch(self) -> None:
         output = Output(**self.context)

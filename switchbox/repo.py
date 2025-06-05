@@ -207,7 +207,7 @@ class Repo:
         include = ["/*"]
         exclude = [f"!{path}" for path in self.config.sparse_checkout_exclude]
         logger.info(
-            "Setting sparse-checkout paths " "to include %(include)r and exclude %(exclude)r",
+            "Setting sparse-checkout paths to include %(include)r and exclude %(exclude)r",
             {"include": include, "exclude": exclude},
         )
         self.gitpython.git._call_process(
